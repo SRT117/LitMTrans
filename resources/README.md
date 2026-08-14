@@ -10,9 +10,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe litmtrans.py
 ```
-默认环境下，PDF 解析、EPUB 本地解析、大模型翻译（OpenAI/DeepSeek/Gemini 等）、Edge 本地/联网翻译、AI 对话、思维导图、HTML 导出均可正常使用。
+这里说明的是源码开发环境。正式 Windows 安装包已经包含 Pandoc、MTranServer、英译简中模型和内嵌中文字体，普通用户无需按本页手动配置。
 
-## 2. 可选增强组件配置（按需添加）
+## 2. 本地开发所需的大型组件
 
 若开发者需要调试本地 Pandoc 转换或 MTranServer 离线神经网络机翻，可按如下目录结构放置可选组件：
 

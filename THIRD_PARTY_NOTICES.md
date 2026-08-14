@@ -10,12 +10,13 @@ LitMTrans 项目自身代码采用 MIT License。本文件记录不受该许可�
 | python-docx | Word 文档处理 | MIT。 |
 | NumPy、Matplotlib、Pillow、zstandard | 计算、图像和压缩支持 | 以各发行版本附带的许可证为准。 |
 | PyInstaller | 构建工具 | 使用其 GPL 例外；最终安装包仍必须满足其中实际包含依赖的许可证。 |
-| Source Han Serif CN Regular 2.003 | 译文阅读与保留版式渲染的内嵌字体 | SIL Open Font License 1.1；未修改，来源为 [Adobe Source Han Serif](https://github.com/adobe-fonts/source-han-serif)，文件为 `resources/fonts/SourceHanSerifCN-Regular.ttf`，SHA-256：`8ba5ec09db04b1d1599edeff3fb5627ca11eaaf85e339e5c32684cb94e806993`。完整许可证见同目录的 `LICENSE-SourceHanSerif.txt`。 |
-| Pandoc 3.8.3 | Word、EPUB 和部分 PDF 的转换与导出 | 不进入公开基础安装包。可选本地构建使用 `resources/pandoc.exe`，SHA-256：`19b8b7c191e33f6870f4cb92768fc3ce558be75f9a22f671d5d22ea35dca95bd`。Pandoc 是独立命令行程序，以 GPL-2.0-or-later 授权；许可证与版权声明位于 `licenses/pandoc/`。公开分发时还必须提供对应源码。 |
-| MTranServer 与语言模型 | 可选离线本地翻译 | 不进入公开基础安装包。只有来源、版本、许可证和再分发权都已核实的运行时与模型才可另行发布；所需声明和源码获取方式必须随包提供。当前本地运行时 SHA-256：`70999a5842984247aeacbd381bc1df26737a129e1a6683be3572bd0cc1b5a798`。 |
+| Source Han Serif CN Regular 2.003 | 译文阅读与保留版式渲染的内嵌字体 | SIL Open Font License 1.1；未修改，来源为 [Adobe Source Han Serif](https://github.com/adobe-fonts/source-han-serif)。完整许可证见字体目录。 |
+| Pandoc 3.8.3 | Word、EPUB 和部分 PDF 的转换与导出 | GPL-2.0-or-later；项目以独立命令行程序形式随 Windows 安装包分发。许可证见 `licenses/pandoc/`，对应源码可从 [Hackage](https://hackage.haskell.org/package/pandoc-3.8.3) 获取。 |
+| MTranServer 4.0.33 | 英译简中离线翻译服务 | Apache-2.0；来源为 [xxnuo/MTranServer](https://github.com/xxnuo/MTranServer)，许可证见 `licenses/mtranserver/`。 |
+| Firefox Translations 英译简中模型 | MTranServer 使用的离线翻译模型 | MPL-2.0；来源为 [Mozilla Firefox Translations models](https://github.com/mozilla/firefox-translations-models)，许可证见 `licenses/mtranserver/`。 |
 
-## 未随仓库发布的资源
+## 大型发行资源
 
-Pandoc、MTranServer、模型文件和用户文档不构成 GitHub 源码发行的一部分。基础安装包只携带仓库中经过审核的小型资源。可选运行时只有在能确认来源、版本、许可证和再分发权，并随包提供所需声明后，才能另行发布。
+Pandoc、MTranServer 和模型文件不提交进 Git 源码仓库，而是在发布构建时从固定的运行时包取得。正式 Windows 安装包包含这些组件及相应许可证。
 
 MinerU 是外部文档解析服务。项目不分发 MinerU 源码或模型；用户自行提供访问令牌并遵守其适用条款。名称和商标归其权利人所有。

@@ -127,6 +127,8 @@ LitMTrans在请求结构中尽量保持全文和历史消息的前缀稳定，�
 
 未签名的 Windows 安装包可能触发 SmartScreen 提示，属于正常现象。
 
+正式 Windows 安装包已经包含 Pandoc、MTranServer、英译简中离线模型和内嵌中文字体，安装后无需再单独下载这些组件。
+
 ## 配置与成本
 
 解析、翻译和AI阅读的服务可以分别配置。翻译模型和对话模型可以使用同一个服务，也可以各自选择不同模型。
@@ -226,7 +228,7 @@ LitMTrans没有内置账号体系，也没有遥测和广告模块。程序设�
 
 ### 缺少Pandoc或MTranServer会影响正常使用吗？
 
-基础功能（PDF解析、在线翻译、Edge翻译、阅读、AI对话、HTML导出）不受影响。Pandoc主要用于Word导出深度排版与公式转换，若未放置且系统PATH中无Pandoc，程序在触发对应导出时会给出提示。
+从正式 Windows 安装包安装时不会缺少：Pandoc、MTranServer 和英译简中模型已经随包提供。只有直接运行源码或自行裁剪程序目录时，才需要按 `resources/README.md` 准备这些组件。
 
 ### 有 Zotero 插件版本吗？
 
