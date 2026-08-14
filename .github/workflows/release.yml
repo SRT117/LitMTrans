@@ -45,16 +45,16 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python scripts/build_release.py
       - name: Build installer
-        shell: powershell
+        shell: pwsh
         run: |
           $version = (python -c "from app_version import APP_VERSION; print(APP_VERSION)").Trim()
           & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$version" 'installer\LitMTrans.iss'
       - name: Create update manifest and checksums
-        shell: powershell
+        shell: pwsh
         run: |
           $version = (python -c "from app_version import APP_VERSION; print(APP_VERSION)").Trim()
           $installer = "installer_dist\LitMTrans-$version-setup.exe"
-          python scripts/create_update_manifest.py --installer $installer --tag "${{ github.ref_name }}" --output installer_dist\update.json --notes "查看本版本的 GitHub Release 说明。"
+          python scripts/create_update_manifest.py --installer $installer --tag "${{ github.ref_name }}" --output installer_dist\update.json --notes "See GitHub Release notes."
           (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() + "  " + (Split-Path $installer -Leaf) | Set-Content installer_dist\SHA256SUMS.txt -Encoding ascii
       - uses: softprops/action-gh-release@v2
         with:
