@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 私密安全报告
+    url: https://github.com/SRT117/LitMTrans/security/advisories/new
+    about: 报告可能泄露密钥、执行代码或破坏数据的安全问题
