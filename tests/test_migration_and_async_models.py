@@ -329,5 +329,36 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
         self.assertEqual(received, [([], "timeout")])
 
 
+    def test_layout_docx_resolves_relative_and_absolute_images(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir).resolve()
+            img_dir = root / "images"
+            img_dir.mkdir()
+            sample_img = img_dir / "sample.jpg"
+            sample_img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb")
+
+            html_file = root / "layout.html"
+            html_content = f"""
+            <section class="layout-page-wrap" data-page-width="595" data-page-height="842">
+                <div class="layout-page">
+                    <div class="layout-block type-image" style="left:50pt;top:100pt;width:200pt;height:150pt;">
+                        <img src="images/sample.jpg"/>
+                    </div>
+                    <div class="layout-block type-image" style="left:50pt;top:300pt;width:200pt;height:150pt;">
+                        <img src="{sample_img.as_uri()}"/>
+                    </div>
+                </div>
+            </section>
+            """
+            html_file.write_text(html_content, encoding="utf-8")
+
+            pages = PB_layout.layout_docx_items_from_html(html_file)
+            self.assertEqual(len(pages), 1)
+            items = pages[0]["items"]
+            self.assertEqual(len(items), 2)
+            self.assertEqual(items[0]["image_path"], sample_img)
+            self.assertEqual(items[1]["image_path"], sample_img)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3691,14 +3691,26 @@ def layout_docx_dom_equation_anchor(item: dict, shape_id: str, omml_map: dict[st
     )
 
 
-def layout_docx_file_uri_path(uri: str) -> Path | None:
-    parsed = urllib.parse.urlparse(str(uri or ""))
+def layout_docx_file_uri_path(uri: str, base_dir: Path | None = None) -> Path | None:
+    if not uri:
+        return None
+    raw_str = str(uri).strip()
+    parsed = urllib.parse.urlparse(raw_str)
     if parsed.scheme and parsed.scheme.lower() != "file":
         return None
-    raw_path = urllib.parse.unquote(parsed.path if parsed.scheme else str(uri or ""))
+    raw_path = urllib.parse.unquote(parsed.path if parsed.scheme else raw_str)
     if sys.platform == "win32" and re.match(r"^/[A-Za-z]:/", raw_path):
         raw_path = raw_path[1:]
     path = Path(raw_path)
+    if path.is_absolute() and path.exists():
+        return path
+    if base_dir is not None:
+        cand = (base_dir / raw_path).resolve()
+        if cand.exists():
+            return cand
+        cand_img = (base_dir / "images" / Path(raw_path).name).resolve()
+        if cand_img.exists():
+            return cand_img
     return path if path.exists() else None
 
 
@@ -4005,7 +4017,11 @@ def layout_docx_items_from_html(
             if not isinstance(runtime_equation_number_bbox, dict):
                 runtime_equation_number_bbox = None
             images = layout_docx_dom_find(node, lambda value: value.get("tag") == "img")
-            image_path = layout_docx_file_uri_path(str((images[0].get("attrs") or {}).get("src") or "")) if images else None
+            image_path = (
+                layout_docx_file_uri_path(str((images[0].get("attrs") or {}).get("src") or ""), base_dir=html_path.parent)
+                if images
+                else None
+            )
             tables = layout_docx_dom_find(node, lambda value: value.get("tag") == "table")
             table_rows = parse_raw_html_table(layout_docx_dom_html(tables[0])) if tables and not image_path else []
             items.append(
