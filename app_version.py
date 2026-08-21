@@ -8,6 +8,6 @@ GITHUB_REPOSITORY = "SRT117/LitMTrans"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_REPOSITORY}"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases"
 UPDATE_MANIFEST_URL = (
-    f"https://github.com/{GITHUB_REPOSITORY}/releases/latest/download/update.json"
+    f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/update.json"
 )
 GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPOSITORY}/issues"

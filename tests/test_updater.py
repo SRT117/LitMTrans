@@ -90,6 +90,23 @@ class UpdaterTests(unittest.TestCase):
             self.assertTrue(keep.exists())
             self.assertTrue(other.exists())
 
+    def test_update_manifest_url_points_to_raw_json(self):
+        from app_version import GITHUB_REPOSITORY, UPDATE_MANIFEST_URL
+
+        expected = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/update.json"
+        self.assertEqual(UPDATE_MANIFEST_URL, expected)
+
+    def test_bundled_update_json_is_valid(self):
+        from pathlib import Path
+        root_update_json = Path(__file__).resolve().parents[1] / "update.json"
+        self.assertTrue(root_update_json.is_file())
+        content = root_update_json.read_text(encoding="utf-8")
+        release = parse_release_manifest(content)
+        self.assertEqual(release.version, APP_VERSION)
+        self.assertTrue(release.installer_url.startswith("https://github.com/"))
+        self.assertEqual(len(release.installer_sha256), 64)
+        self.assertGreater(release.installer_size, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

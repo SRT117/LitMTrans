@@ -32,7 +32,7 @@ def main() -> None:
         "README.md", "PRIVACY.md", "SECURITY.md", "LICENSE", "CHANGELOG.md",
         "installer/LitMTrans.iss", "resources/icon.ico", "resources/assets/checkmark.svg",
         "resources/filters/export_fidelity.lua", "resources/fonts/SourceHanSerifCN-Regular.ttf",
-        "resources/templates/reference.docx",
+        "resources/templates/reference.docx", "update.json",
     ]
     missing = [name for name in required if not (ROOT / name).is_file()]
     if missing:
