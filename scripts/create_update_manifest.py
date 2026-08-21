@@ -12,6 +12,28 @@ sys.path.insert(0, str(ROOT))
 from app_version import APP_VERSION, GITHUB_REPOSITORY  # noqa: E402
 
 
+def extract_changelog_notes(version: str) -> str:
+    changelog = ROOT / "CHANGELOG.md"
+    if not changelog.exists():
+        return ""
+    text = changelog.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    in_version = False
+    collected = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if stripped == f"## {version}":
+                in_version = True
+                continue
+            elif in_version:
+                break
+        elif in_version:
+            if stripped:
+                collected.append(line.rstrip())
+    return "\n".join(collected).strip()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--installer", required=True, type=Path)
@@ -25,9 +47,16 @@ def main() -> None:
     with args.installer.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
+    notes = args.notes.strip()
+    if not notes or notes == "See GitHub Release notes.":
+        extracted = extract_changelog_notes(APP_VERSION)
+        if extracted:
+            notes = extracted
+        else:
+            notes = "See GitHub Release notes."
     manifest = {
         "version": APP_VERSION,
-        "notes": args.notes.strip(),
+        "notes": notes,
         "installer": {
             "url": f"https://github.com/{GITHUB_REPOSITORY}/releases/download/{args.tag}/{args.installer.name}",
             "sha256": digest.hexdigest(),

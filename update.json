@@ -1,8 +1,8 @@
 {
-  "version": "1.0.3",
-  "notes": "See GitHub Release notes.",
+  "version": "1.0.4",
+  "notes": "- 新增启动自动深度清理：升级启动后自动清理历史安装包与临时残片，确保零磁盘占用。\n- 自动更新弹窗支持完整中文更新要点。\n- 保持全量开箱即用：内置完整 Pandoc 与本地机翻离线模型，下载即用无需额外配置。\n- 增强底层模型寻径架构与残破文件严格校验防御。",
   "installer": {
-    "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.3/LitMTrans-1.0.3-setup.exe",
+    "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.4/LitMTrans-1.0.4-setup.exe",
     "sha256": "8449be0adea77ccf725439fd4971ec77047009c9b4cf23d155688579ae8d22f4",
     "size": 272798723
   }
