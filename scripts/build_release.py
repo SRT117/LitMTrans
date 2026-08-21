@@ -18,9 +18,26 @@ def numeric_version() -> tuple[int, int, int, int]:
     return (*parts, 0)
 
 
+def assert_release_runtime_present(resources_dir: Path, stage: str = "Source") -> None:
+    check_dir = resources_dir
+    if not (check_dir / "pandoc.exe").exists() and (check_dir.parent / "_internal" / "resources" / "pandoc.exe").exists():
+        check_dir = check_dir.parent / "_internal" / "resources"
+    required = [
+        check_dir / "pandoc.exe",
+        check_dir / "mtranserver" / "bin" / "mtranserver-windows-amd64.exe",
+        check_dir / "mtranserver" / "models" / "en_zh-Hans" / "model.enzh.intgemm.alphas.bin",
+    ]
+    missing = [str(p) for p in required if not p.exists()]
+    if missing:
+        raise SystemExit(f"[{stage} check failed] Missing required release runtime components: {', '.join(missing)}")
+
+
 def main() -> None:
     build_dir = ROOT / "build"
     dist_dir = ROOT / "dist"
+    resources_dir = ROOT / "resources"
+    assert_release_runtime_present(resources_dir, stage="Pre-build")
+
     build_dir.mkdir(exist_ok=True)
     if (dist_dir / APP_NAME).exists():
         shutil.rmtree(dist_dir / APP_NAME)
@@ -48,6 +65,8 @@ VSVersionInfo(
         cwd=ROOT,
         check=True,
     )
+    assert_release_runtime_present(dist_dir / APP_NAME / "resources", stage="Post-build output")
+    print(f"Build completed successfully with full runtime bundled for {APP_NAME} v{APP_VERSION}.")
 
 
 if __name__ == "__main__":

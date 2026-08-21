@@ -4529,8 +4529,17 @@ class ChatWindow(QWidget):
             image_id = str(record.get("id") or "").strip()
             clean_target = str(record.get("clean_target") or "").strip()
             saved_file = str(record.get("saved_file") or "").strip()
-            image_path = Path(saved_file) if saved_file else folder / clean_target
-            if image_id and image_path.exists():
+            local_candidates = [
+                folder / clean_target if clean_target else None,
+                folder / Path(saved_file).name if saved_file else None,
+                folder / "images" / Path(saved_file).name if saved_file else None,
+            ]
+            image_path = next((p for p in local_candidates if p and p.is_file()), None)
+            if image_path is None and saved_file:
+                external = Path(saved_file)
+                if external.is_file():
+                    image_path = external
+            if image_id and image_path and image_path.exists():
                 image_map[image_id] = image_path
         return image_map
 

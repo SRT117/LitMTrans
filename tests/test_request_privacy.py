@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from AI_common import USER_AGENT
+from app_version import APP_VERSION
 from OT_common import _settings_from_dict
 from AI_request_construction import (
     REQUEST_BODY_MODE_CODEX,
@@ -580,7 +581,7 @@ class RequestPrivacyTests(unittest.TestCase):
         )
 
     def test_standard_headers_do_not_impersonate_a_browser_or_cherry(self):
-        self.assertEqual(USER_AGENT, "LitMTrans/1.0.0")
+        self.assertEqual(USER_AGENT, f"LitMTrans/{APP_VERSION}")
         for headers in (build_headers("test-key", stream=True), build_multipart_headers("test-key")):
             joined = "\n".join(f"{key}: {value}" for key, value in headers.items()).lower()
             self.assertIn("litmtrans/1.0", joined)
@@ -745,7 +746,7 @@ class RequestPrivacyTests(unittest.TestCase):
 
         payload = request.call_args.args[2]
         self.assertEqual(payload["thinking"], {"type": "disabled"})
-        self.assertEqual(payload["stream_options"], {"include_usage": True})
+        self.assertNotIn("stream_options", payload)
         self.assertNotIn("reasoning_effort", payload)
 
         config.thinking_mode = "enabled"
@@ -755,6 +756,12 @@ class RequestPrivacyTests(unittest.TestCase):
         payload = request.call_args.args[2]
         self.assertEqual(payload["thinking"], {"type": "enabled"})
         self.assertEqual(payload["reasoning_effort"], "max")
+        self.assertNotIn("stream_options", payload)
+
+        with patch("LS_pipeline.ai_chat_completion_stream", return_value="streamed") as stream_request:
+            ai_chat_completion(config, [{"role": "user", "content": "translate"}], stream_callback=lambda x: None)
+        stream_payload = stream_request.call_args.args[1]
+        self.assertEqual(stream_payload["stream_options"], {"include_usage": True})
 
     def test_deepseek_fast_layout_uses_full_markdown_prefix_and_waits_for_hit(self):
         root = Path(__file__).resolve().parents[1]

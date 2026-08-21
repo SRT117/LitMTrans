@@ -1283,18 +1283,21 @@ def _ai_chat_completion_once_unlimited(
         headers = claude_headers(config.api_key, stream=stream_callback is not None)
         endpoint = request_url_for_construction(config.base_url, config.provider_id, mode)
     else:
+        is_stream = stream_callback is not None
         payload = {
             "model": config.model,
             "messages": messages,
             "temperature": 0.2,
-            "stream": stream_callback is not None,
+            "stream": is_stream,
         }
         headers = build_codex_cache_headers(config)
         if headers:
             payload["prompt_cache_key"] = config.prompt_cache_key
-            payload["stream_options"] = {"include_usage": True}
+            if is_stream:
+                payload["stream_options"] = {"include_usage": True}
         elif is_gemini_provider(config.provider_id, config.base_url):
-            payload["stream_options"] = {"include_usage": True}
+            if is_stream:
+                payload["stream_options"] = {"include_usage": True}
             thinking_enabled = str(config.thinking_mode or "").strip().lower() == "enabled"
             if thinking_enabled:
                 payload["extra_body"] = {
@@ -1305,9 +1308,9 @@ def _ai_chat_completion_once_unlimited(
         elif config.provider_id == "deepseek":
             thinking_enabled = str(config.thinking_mode or "").strip().lower() == "enabled"
             payload["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
-            # DeepSeek reports disk-cache hit/miss counters in the terminal
-            # SSE event only when usage is requested.
-            payload["stream_options"] = {"include_usage": True}
+            # DeepSeek 仅在流式请求且开启 usage 时在末尾 SSE 事件返回缓存命中信息
+            if is_stream:
+                payload["stream_options"] = {"include_usage": True}
             if thinking_enabled:
                 effort = str(config.reasoning_effort or "high").strip().lower()
                 payload["reasoning_effort"] = effort if effort in {"high", "max"} else "high"
@@ -4233,8 +4236,7 @@ def stored_original_path(output_dir: Path, source_path: Path) -> Path:
 def find_stored_original(folder: Path, meta: dict | None = None) -> Path | None:
     # Document-chat bubbles use the parsed Markdown path and do not carry the
     # metadata loaded by MainWindow.
-    # 因此在这里自行读取任务元数据，优先锁定上传时保存的原始副本，不能依赖
-    # 文件夹遍历顺序（其中可能混有 preview / layout 等生成的 HTML）。
+    # 因此在这里自行读取任务元数据，优先锁定文献目录内部保存的原始副本。
     if meta is None:
         meta_path = folder / "mineru_task.json"
         try:
@@ -4244,24 +4246,32 @@ def find_stored_original(folder: Path, meta: dict | None = None) -> Path | None:
             meta = {}
 
     meta = meta or {}
-    stored_path = Path(str(meta.get("source_file") or "")).expanduser()
-    if stored_path.is_file():
-        return stored_path
-
     source_name = Path(str(meta.get("source_file") or meta.get("source_pdf") or "")).name
     candidates: list[Path] = []
     if source_name:
         candidates.append(folder / source_name)
-    candidates.extend(
-        path for path in folder.iterdir()
-        if (
-            path.is_file()
-            and path.suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
-            and not path.name.lower().startswith(("preview.", "layout.", "debug."))
+    try:
+        candidates.extend(
+            path for path in folder.iterdir()
+            if (
+                path.is_file()
+                and path.suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
+                and not path.name.lower().startswith(("preview.", "layout.", "debug."))
+            )
         )
-    )
+    except OSError:
+        pass
     candidates.extend(folder.glob("mineru_result/*_origin.pdf"))
-    return next((path for path in candidates if path.exists()), None)
+    candidates.extend(path for path in folder.glob("original.*") if path.is_file())
+
+    local_found = next((path for path in candidates if path.is_file()), None)
+    if local_found is not None:
+        return local_found
+
+    stored_path = Path(str(meta.get("source_file") or "")).expanduser()
+    if stored_path.is_file():
+        return stored_path
+    return None
 
 
 def basic_export_warnings(path: Path) -> list[str]:

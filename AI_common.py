@@ -21,6 +21,7 @@ from datetime import datetime
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from workspace_paths import configured_work_dir, default_workspace_path
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -1056,16 +1057,32 @@ def load_settings() -> AppSettings:
         if _FRESH_USER_DEBUG_SETTINGS is None:
             _FRESH_USER_DEBUG_SETTINGS = AppSettings()
         return _FRESH_USER_DEBUG_SETTINGS
+
+    primary_settings = None
     for candidate in (SETTINGS_PATH, *LEGACY_SETTINGS_PATHS):
         if not candidate.exists():
             continue
         try:
             data = json.loads(candidate.read_text(encoding="utf-8", errors="replace"))
             if isinstance(data, dict):
-                return _settings_from_dict(data)
+                primary_settings = _settings_from_dict(data)
+                break
         except Exception:
             pass
-    return AppSettings()
+
+    if primary_settings is None:
+        primary_settings = AppSettings()
+
+    if not primary_settings.work_dir:
+        workbench_candidates = (
+            APP_DIR / "settings.json",
+            APP_DIR / "settings_workbench.json",
+            *(directory / "settings_workbench.json" for directory in LEGACY_APP_DIRS),
+            *(directory / "settings.json" for directory in LEGACY_APP_DIRS),
+        )
+        primary_settings.work_dir = configured_work_dir((*LEGACY_SETTINGS_PATHS, *workbench_candidates))
+
+    return primary_settings
 
 
 def save_settings(settings: AppSettings) -> None:
@@ -1568,11 +1585,15 @@ class _MinerUNamespace:
 mineru = _MinerUNamespace()
 
 
+def default_work_dir_path() -> Path:
+    return default_workspace_path(APP_DIR, LEGACY_APP_DIRS, Path(__file__).parent)
+
+
 def work_dir_path(settings: AppSettings | None = None) -> Path:
     settings = settings or load_settings()
     if settings.work_dir:
         return Path(settings.work_dir)
-    return APP_DIR / "workspace"
+    return default_work_dir_path()
 
 
 def chat_history_path(settings: AppSettings | None = None) -> Path:
@@ -1611,6 +1632,7 @@ class _EmbeddedAppConfig:
     save_mineru_token = staticmethod(save_mineru_token)
     load_mineru_token = staticmethod(load_mineru_token)
     work_dir_path = staticmethod(work_dir_path)
+    default_work_dir_path = staticmethod(default_work_dir_path)
     chat_history_path = staticmethod(chat_history_path)
     choose_preferred_model = staticmethod(choose_preferred_model)
 

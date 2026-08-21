@@ -1959,7 +1959,14 @@ def render_original_pdf_preview_html(pdf_path: Path) -> Path | None:
                         text_page.close()
                 finally:
                     page.close()
-                image_url = image_path.resolve().as_uri()
+                try:
+                    rel_img = image_path.resolve().relative_to(pdf_path.parent.resolve()).as_posix()
+                    image_url = urllib.parse.quote(rel_img, safe="/")
+                except Exception:
+                    try:
+                        image_url = image_path.resolve().as_uri()
+                    except Exception:
+                        image_url = str(image_path)
                 rendered_pages.append(
                     f"""<section class="pdf-page-wrap" data-sync-page-index="{page_index}" data-page-width="{page_width:.3f}" data-page-height="{page_height:.3f}">"""
                     f"""<div class="pdf-page-shell" data-page-width="{page_width:.3f}" data-page-height="{page_height:.3f}" style="width:{page_width:.3f}px;height:{page_height:.3f}px;">"""
@@ -4629,6 +4636,19 @@ def expand_bbox_to_column_right(
     return expanded
 
 
+def layout_image_src_url(image_path: Path, asset_dir: Path) -> str:
+    """优先生成相对文献目录的图片 URI，失败时回退到绝对 URI。"""
+    try:
+        doc_folder = asset_dir.parent if asset_dir.name == "mineru_result" else asset_dir
+        rel = image_path.resolve().relative_to(doc_folder.resolve()).as_posix()
+        return urllib.parse.quote(rel, safe="/")
+    except Exception:
+        try:
+            return image_path.resolve().as_uri()
+        except Exception:
+            return str(image_path)
+
+
 def layout_block_image_or_table_html(block: dict, block_type: str, asset_dir: Path) -> str:
     spans: list[dict] = []
     for line in block.get("lines") or []:
@@ -4664,8 +4684,9 @@ def layout_block_image_or_table_html(block: dict, block_type: str, asset_dir: Pa
             return f"""<pre class="layout-code" data-code-language="{language}"><code>{html.escape(code_text)}</code></pre>"""
     if image_path is not None and image_path.is_file():
         media_class = "layout-equation-media" if block_type == "interline_equation" else "layout-media"
+        image_src = layout_image_src_url(image_path, asset_dir)
         return (
-            f"""<img class="{media_class}" src="{image_path.resolve().as_uri()}" """
+            f"""<img class="{media_class}" src="{image_src}" """
             f"""alt="{html.escape(block_type)}" loading="lazy" decoding="async">"""
         )
     if block_type == "table_body" and span.get("html"):
@@ -4762,7 +4783,8 @@ def render_layout_equation_block(
             None if number_right is None else number_right - float(bbox[0]),
         )
     elif image_path and image_path.exists():
-        body_html = f"""<img class="layout-equation-media" src="{image_path.resolve().as_uri()}" alt="equation">"""
+        image_src = layout_image_src_url(image_path, asset_dir)
+        body_html = f"""<img class="layout-equation-media" src="{image_src}" alt="equation">"""
     else:
         body_html = layout_lines_to_html(block.get("lines"))
         if body_html:

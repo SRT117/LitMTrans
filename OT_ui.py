@@ -26,10 +26,12 @@ from LS_pipeline import *
 from app_version import APP_VERSION, GITHUB_ISSUES_URL, GITHUB_RELEASES_URL, GITHUB_REPO_URL
 from updater import ReleaseInfo, UpdateCheckWorker, UpdateDownloadWorker, format_size, is_newer_version, launch_installer
 
-from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QMargins, QObject, QPointF, QRectF, QSizeF, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QMargins, QObject, QPointF, QRectF, QSizeF, Qt, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices, QImage, QPainter, QPalette, QPen, QPixmap, QTextOption
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWidgets import QAbstractSpinBox, QDialog, QDialogButtonBox, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractSpinBox, QDialog, QDialogButtonBox, QLabel, QProgressDialog, QVBoxLayout, QWidget
+
+from workspace_migration import copy_workspace_data
 
 try:
     from PySide6.QtPdf import QPdfDocument
@@ -1678,23 +1680,59 @@ class ModelOptionsFetchWorker(QThread):
         self.provider_id = provider_id
         self.api_key = api_key
         self.base_url = base_url
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
 
     def run(self):
         try:
+            if self._is_cancelled:
+                return
             result = http_json(
                 "GET",
                 provider_model_list_url(self.provider_id, self.base_url),
                 token=self.api_key,
                 timeout=10,
             )
+            if self._is_cancelled:
+                return
             models = result.get("data") or []
             options = build_translation_model_options(
                 self.provider_id,
                 list(models) if isinstance(models, list) else [],
             )
-            self.finished_signal.emit(options, "")
+            if not self._is_cancelled:
+                self.finished_signal.emit(options, "")
         except Exception as exc:
-            self.finished_signal.emit([], str(exc))
+            if not self._is_cancelled:
+                self.finished_signal.emit([], str(exc))
+
+
+class WorkspaceMigrationWorker(QThread):
+    """后台复制工作目录，旧目录始终保持不变。"""
+
+    finished_signal = Signal(object, str)
+
+    def __init__(self, old_dir: Path, new_dir: Path):
+        super().__init__()
+        self.old_dir = Path(old_dir)
+        self.new_dir = Path(new_dir)
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        try:
+            migrated_map = copy_workspace_data(
+                self.old_dir,
+                self.new_dir,
+                cancelled=lambda: self._cancelled or self.isInterruptionRequested(),
+            )
+            self.finished_signal.emit(migrated_map, "")
+        except Exception as exc:
+            self.finished_signal.emit({}, str(exc))
 
 
 def layout_preview_source_stamp(path: Path) -> str:
@@ -4729,10 +4767,19 @@ class MainWindow(QWidget):
         super().__init__()
         self.settings = app_config.load_settings()
         configured_work_dir = str(getattr(self.settings, "work_dir", "") or "").strip()
+        effective_work_dir = self.work_dir_path()
+        has_existing_data = False
+        try:
+            has_existing_data = effective_work_dir.exists() and any(effective_work_dir.iterdir())
+        except OSError:
+            pass
         self._startup_configuration_required = bool(
-            not configured_work_dir or not Path(configured_work_dir).expanduser().exists()
+            not configured_work_dir and not has_existing_data
+        ) or bool(
+            configured_work_dir and not Path(configured_work_dir).expanduser().exists()
         )
         self.preview_provider = preview_tools.SourcePreviewProvider(WORKSPACE)
+        self._active_work_dir_labels: set[QLabel] = set()
         self.worker: MinerUWorker | None = None
         self.translate_worker: TranslateWorker | None = None
         self.source_preview_worker: PreviewRenderWorker | None = None
@@ -5237,163 +5284,234 @@ class MainWindow(QWidget):
             return
         self.choose_work_dir(initial=True)
 
-    def choose_work_dir(self, initial: bool = False):
-        """
-        重新选择工作文件夹。
-
-        initial=True 表示首次启动时使用，取消选择后回退到默认工作目录；
-        initial=False 表示用户手动点击按钮时使用，取消后不修改现有设置。
-        """
+    def choose_work_dir(self, initial: bool = False, parent_widget: QWidget | None = None):
+        """选择工作文件夹；迁移时在后台复制并在成功后切换。"""
+        parent_dialog = parent_widget or self
+        active_migration = getattr(self, "_work_dir_migration_worker", None)
+        if active_migration is not None and self.is_thread_running(active_migration):
+            QMessageBox.information(parent_dialog, "正在迁移", "请等待当前工作文件夹迁移完成或先取消迁移。")
+            return
         old_dir = self.work_dir_path()
         start_dir = old_dir if old_dir.exists() else Path.home()
         selected = QFileDialog.getExistingDirectory(
-            self,
+            parent_dialog,
             "选择工作文件夹",
             str(start_dir),
             QFileDialog.Option.ShowDirsOnly,
         )
-
         if not selected:
-            if initial:
-                selected = str(old_dir)
-            else:
+            if not initial:
                 return
+            selected = str(old_dir)
 
         new_dir = Path(selected).expanduser().resolve()
         if new_dir == old_dir:
-            self.settings.work_dir = str(new_dir)
             new_dir.mkdir(parents=True, exist_ok=True)
-            app_config.save_settings(self.settings)
-            self.refresh_work_dir_label()
+            self.apply_work_dir_change(new_dir)
             return
 
-        # 如果新旧工作目录存在包含关系，自动迁移容易把数据搬进自己内部，
-        # 这里仅切换目录，不执行迁移。
-        contains_relationship = False
         try:
             contains_relationship = new_dir.is_relative_to(old_dir) or old_dir.is_relative_to(new_dir)
-        except Exception:
-            old_text = str(old_dir.resolve())
-            new_text = str(new_dir.resolve())
-            contains_relationship = old_text.startswith(new_text) or new_text.startswith(old_text)
+        except (OSError, ValueError):
+            contains_relationship = False
 
-        migrate_old_data = False
-        if (
+        should_offer_migration = (
             not initial
-            and old_dir.exists()
+            and not contains_relationship
             and old_dir.is_dir()
             and any(old_dir.iterdir())
-        ):
-            if contains_relationship:
-                QMessageBox.information(
-                    self,
-                    "无法自动迁移",
-                    "新旧工作文件夹存在包含关系，已仅切换目录，不执行迁移。",
-                )
-            else:
-                choice = QMessageBox.question(
-                    self,
-                    "迁移原数据",
-                    "当前工作文件夹中检测到已有解析结果、对话记录或缓存数据。\n\n"
-                    f"旧文件夹：{old_dir}\n"
-                    f"新文件夹：{new_dir}\n\n"
-                    "是否将原数据迁移到新工作文件夹？\n"
-                    "选择“是”只会迁移程序生成的数据（解析结果、译文、聊天记录）；"
-                    "选择“否”仅切换目录；选择“取消”则放弃此次更改。",
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No
-                    | QMessageBox.StandardButton.Cancel,
-                    QMessageBox.StandardButton.Yes,
-                )
-                if choice == QMessageBox.StandardButton.Cancel:
-                    return
-                migrate_old_data = choice == QMessageBox.StandardButton.Yes
+        )
+        migrate_old_data = False
+        if should_offer_migration:
+            choice = QMessageBox.question(
+                parent_dialog,
+                "迁移原数据",
+                "是否将原工作文件夹中的程序数据复制到新工作文件夹？\n\n"
+                f"旧文件夹：{old_dir}\n"
+                f"新文件夹：{new_dir}\n\n"
+                "迁移成功前不会切换工作文件夹，旧数据也不会被删除。"
+                "选择“否”仅切换目录。",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            )
+            if choice == QMessageBox.StandardButton.Cancel:
+                return
+            migrate_old_data = choice == QMessageBox.StandardButton.Yes
+        elif contains_relationship and not initial:
+            QMessageBox.information(
+                parent_dialog,
+                "无法自动迁移",
+                "新旧工作文件夹存在包含关系，将只切换目录，不复制数据。",
+            )
+
+        if not migrate_old_data:
+            new_dir.mkdir(parents=True, exist_ok=True)
+            self.apply_work_dir_change(new_dir)
+            return
 
         new_dir.mkdir(parents=True, exist_ok=True)
+        if any(new_dir.iterdir()):
+            QMessageBox.warning(
+                parent_dialog,
+                "无法自动迁移",
+                "为避免覆盖或合并错误，请选择一个空文件夹作为新的工作文件夹。",
+            )
+            return
 
         current_markdown = getattr(self, "current_markdown_path", None)
-        reopened_markdown = None
-        if migrate_old_data:
-            self.migrate_work_dir_data(old_dir, new_dir)
-            reopened_markdown = self.remap_work_dir_path(current_markdown, old_dir, new_dir)
+        progress = QProgressDialog("正在复制并校验工作文件夹数据…", "取消", 0, 0, parent_dialog)
+        progress.setWindowTitle("迁移工作文件夹")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        worker = WorkspaceMigrationWorker(old_dir, new_dir)
+        self._work_dir_migration_worker = worker
+        self._work_dir_migration_progress = progress
+        progress.canceled.connect(worker.cancel)
 
+        def finish_migration(migrated_map: dict[Path, Path], error: str):
+            progress.close()
+            self._work_dir_migration_progress = None
+            if error:
+                QMessageBox.critical(
+                    parent_dialog,
+                    "迁移未完成",
+                    f"{error}\n\n程序仍在使用原工作文件夹，原数据没有被删除。",
+                )
+                return
+            self.remap_settings_paths(migrated_map)
+            self.apply_work_dir_change(new_dir, current_markdown, migrated_map)
+
+            msg_box = QMessageBox(parent_dialog)
+            msg_box.setWindowTitle("迁移完成")
+            msg_box.setIcon(QMessageBox.Icon.Information)
+            msg_box.setText(
+                f"工作文件夹已成功切换到：\n{new_dir}\n\n"
+                f"出于保险考虑，旧文件夹的数据并未删除，如果需要删除，请您手动删除：\n{old_dir}"
+            )
+            open_btn = msg_box.addButton("打开旧文件夹", QMessageBox.ButtonRole.ActionRole)
+            ok_btn = msg_box.addButton("确定", QMessageBox.ButtonRole.AcceptRole)
+            msg_box.setDefaultButton(ok_btn)
+            msg_box.exec()
+            if msg_box.clickedButton() == open_btn:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(old_dir.resolve())))
+
+        worker.finished_signal.connect(finish_migration)
+        worker.finished.connect(lambda: setattr(self, "_work_dir_migration_worker", None))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        progress.show()
+
+    def apply_work_dir_change(
+        self,
+        new_dir: Path,
+        current_markdown: Path | None = None,
+        migrated_map: dict[Path, Path] | None = None,
+    ):
+        """保存新工作目录并同步刷新界面状态。"""
+        new_dir = Path(new_dir).expanduser().resolve()
         self.settings.work_dir = str(new_dir)
         app_config.save_settings(self.settings)
+        try:
+            import AI_common
+            ai_settings = AI_common.load_settings()
+            ai_settings.work_dir = str(new_dir)
+            AI_common.save_settings(ai_settings)
+        except Exception:
+            pass
         self.refresh_work_dir_label()
-
-        # 如果输入框里已经有当前文件，顺手刷新一下输出目录提示。
-        if hasattr(self, "pdf_input") and hasattr(self, "output_label"):
+        for label in list(getattr(self, "_active_work_dir_labels", set())):
             try:
-                selected_file = Path(self.pdf_input.text().strip())
+                label.setText(str(new_dir))
+            except (RuntimeError, AttributeError):
+                pass
+        QCoreApplication.processEvents()
+
+        if hasattr(self, "pdf_input") and hasattr(self, "output_label"):
+            selected_text = self.pdf_input.text().strip()
+            if selected_text:
+                selected_file = Path(selected_text)
                 if selected_file.exists():
                     self.output_label.setText(f"输出目录: {output_dir_for_pdf(selected_file)}")
-            except Exception:
-                pass
 
-        # 如果当前正在查看的文档已经迁移到新工作文件夹，自动重新打开它。
         if hasattr(self, "doc_list"):
-            if reopened_markdown and reopened_markdown.exists():
-                self.load_markdown(reopened_markdown)
+            reopened = self.remap_work_dir_path(current_markdown, migrated_map or {})
+            if reopened and reopened.exists():
+                self.load_markdown(reopened)
             self.refresh_docs()
 
-    def remap_work_dir_path(self, path: Path | None, old_dir: Path, new_dir: Path) -> Path | None:
-        """把旧工作目录中的文件路径映射到新工作目录。"""
+    def remap_work_dir_path(self, path: Path | None, migrated_map: dict[Path, Path]) -> Path | None:
+        """把旧工作目录中的文件路径映射到新工作目录（依据实际迁移映射）。"""
         if not path:
             return None
         try:
-            relative = Path(path).resolve().relative_to(old_dir.resolve())
+            resolved = Path(path).resolve()
+            for old_p, new_p in migrated_map.items():
+                old_res = Path(old_p).resolve()
+                new_res = Path(new_p).resolve()
+                if resolved == old_res:
+                    return new_res if new_res.exists() else None
+                try:
+                    candidate = new_res / resolved.relative_to(old_res)
+                    return candidate if candidate.exists() else None
+                except ValueError:
+                    continue
         except Exception:
-            return None
-        candidate = new_dir.resolve() / relative
-        return candidate if candidate.exists() else None
-
-    def migrate_work_dir_data(self, old_dir: Path, new_dir: Path):
-        """只迁移程序生成的数据到新目录，避免误搬用户自带文件。"""
-        if not old_dir.exists() or old_dir.resolve() == new_dir.resolve():
-            return
-        for item in old_dir.iterdir():
-            if not self.should_migrate_work_dir_item(item):
-                continue
-            target = new_dir / item.name
-            self.move_work_dir_item(item, target)
-
-        # 尽量清理已经空掉的旧目录，避免用户误以为数据还留在旧位置。
-        try:
-            old_dir.rmdir()
-        except OSError:
             pass
+        return None
 
-    def should_migrate_work_dir_item(self, item: Path) -> bool:
-        """只迁移被程序写入过标记的输出目录，以及聊天记录文件。"""
-        if item.is_dir():
-            return is_generated_output_dir(item)
-        return item.name == WORK_DIR_CHAT_HISTORY_NAME
-
-    def move_work_dir_item(self, source: Path, target: Path):
-        """移动单个文件或文件夹，必要时自动改名避免覆盖。"""
-        if source.resolve() == target.resolve():
+    def remap_settings_paths(self, migrated_map: dict[Path, Path]):
+        """根据实际成功迁移的目录映射，重映射 settings 中保存的文献排序、最后打开文献和自定义字号。"""
+        if not migrated_map:
             return
-        if target.exists():
-            target = self.unique_migration_path(target)
+        try:
+            def remap_path_str(path_str: str) -> str:
+                if not path_str:
+                    return ""
+                try:
+                    p = Path(path_str).resolve()
+                    for old_p, new_p in migrated_map.items():
+                        old_res = Path(old_p).resolve()
+                        new_res = Path(new_p).resolve()
+                        if p == old_res:
+                            return str(new_res)
+                        try:
+                            return str(new_res / p.relative_to(old_res))
+                        except ValueError:
+                            continue
+                except Exception:
+                    pass
+                return path_str
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(source), str(target))
+            orders = getattr(self.settings, "document_order", []) or []
+            self.settings.document_order = [remap_path_str(p) for p in orders]
 
-    @staticmethod
-    def unique_migration_path(target: Path) -> Path:
-        """为迁移目标生成不冲突的新名字。"""
-        if not target.exists():
-            return target
+            last_open = getattr(self.settings, "last_open_document", "") or ""
+            if last_open:
+                self.settings.last_open_document = remap_path_str(last_open)
 
-        parent = target.parent
-        stem = target.stem
-        suffix = target.suffix
-        index = 1
-        while True:
-            candidate = parent / f"{stem}_migrated_{index}{suffix}"
-            if not candidate.exists():
-                return candidate
-            index += 1
+            old_fonts = getattr(self.settings, "layout_body_font_by_document", {}) or {}
+            self.settings.layout_body_font_by_document = {
+                remap_path_str(k): v for k, v in old_fonts.items()
+            }
+
+            recent = getattr(self.settings, "recent_files", []) or []
+            new_recent = []
+            for path_str in recent:
+                remapped = remap_path_str(path_str)
+                new_recent.append(remapped if Path(remapped).exists() else path_str)
+            self.settings.recent_files = new_recent
+
+            ref_paths = getattr(self.settings, "translation_reference_paths", []) or []
+            new_refs = []
+            for path_str in ref_paths:
+                remapped = remap_path_str(path_str)
+                new_refs.append(remapped if Path(remapped).exists() else path_str)
+            self.settings.translation_reference_paths = new_refs
+
+        except Exception:
+            pass
 
     def setup_ui_legacy(self):
         root = QVBoxLayout(self)
@@ -6182,12 +6300,11 @@ class MainWindow(QWidget):
         work_dir_layout.addLayout(work_dir_row)
         layout.addWidget(work_dir_group)
 
+        self._active_work_dir_labels.add(work_dir_path_label)
+        dialog.finished.connect(lambda: self._active_work_dir_labels.discard(work_dir_path_label))
+
         def choose_dialog_work_dir():
-            before = self.work_dir_path()
-            self.choose_work_dir()
-            after = self.work_dir_path()
-            if before != after:
-                work_dir_path_label.setText(str(after))
+            self.choose_work_dir(parent_widget=dialog)
 
         choose_work_dir_button.clicked.connect(choose_dialog_work_dir)
 
@@ -6416,11 +6533,53 @@ class MainWindow(QWidget):
                 translation_model_combo.setCurrentIndex(0)
             if ai_key_input.text().strip() and base_url_input.text().strip():
                 translation_status.setText("正在自动刷新模型列表...")
-                QTimer.singleShot(50, refresh_translation_models)
+                QTimer.singleShot(50, lambda: refresh_translation_models(user_initiated=False))
             else:
                 translation_status.setText("填写 API 密钥后，点击“刷新模型列表”选择模型。")
 
-        def refresh_translation_models():
+        model_options_worker_holder = [None]
+        active_fetch_workers = set()
+
+        def cleanup_worker(worker_obj):
+            active_fetch_workers.discard(worker_obj)
+            if model_options_worker_holder[0] is worker_obj:
+                model_options_worker_holder[0] = None
+
+        def on_dialog_finished(_result=0):
+            for w in list(active_fetch_workers):
+                try:
+                    w.cancel()
+                    w.finished_signal.disconnect()
+                except Exception:
+                    pass
+
+        dialog.finished.connect(on_dialog_finished)
+
+        def on_model_fetch_finished(fetch_provider_id: str, model_options: list, error_msg: str, user_initiated: bool):
+            refresh_translation_models_button.setEnabled(True)
+            if provider_combo.currentData() != fetch_provider_id:
+                return
+            if error_msg:
+                translation_status.setText(f"获取模型列表遇到问题：{error_msg}")
+                if user_initiated:
+                    QMessageBox.critical(dialog, "刷新模型失败", error_msg)
+                return
+            current_model = str(translation_model_combo.currentData() or translation_model_combo.currentText().strip())
+            translation_model_combo.setProperty("provider_id", fetch_provider_id)
+            preferred = apply_model_options_to_combo(translation_model_combo, model_options, current_model)
+            translation_status.setText(f"已加载 {len(model_options)} 个模型")
+            if current_model and current_model not in [option.model_id for option in model_options] and preferred:
+                translation_status.setText(
+                    f"上次默认模型“{current_model}”已无法访问，已按优先原则改用“{preferred}”。"
+                )
+                if user_initiated:
+                    QMessageBox.information(
+                        dialog,
+                        "默认模型已切换",
+                        f"上次默认模型“{current_model}”已不在当前模型列表中。\n已自动改用“{preferred}”。",
+                    )
+
+        def refresh_translation_models(user_initiated: bool = False):
             provider_id = provider_combo.currentData() or "zai"
             if machine_translate.is_machine_translation_provider(provider_id):
                 translation_status.setText("本地免费机翻使用内置语言包，不需要刷新模型。" if provider_id == machine_translate.MTRAN_SERVER_PROVIDER else "免费机翻不需要刷新模型。")
@@ -6428,31 +6587,37 @@ class MainWindow(QWidget):
             api_key = ai_key_input.text().strip()
             base_url = normalize_ai_base_url(base_url_input.text().strip(), provider_id)
             if not api_key or not base_url:
-                QMessageBox.warning(dialog, "缺少配置", "请先填写 API 密钥和服务地址。")
+                if user_initiated:
+                    QMessageBox.warning(dialog, "缺少配置", "请先填写 API 密钥和服务地址。")
+                else:
+                    translation_status.setText("填写 API 密钥后，点击“刷新模型列表”选择模型。")
                 return
-            try:
-                refresh_translation_models_button.setEnabled(False)
-                current_model = str(translation_model_combo.currentData() or translation_model_combo.currentText().strip())
-                model_options = fetch_translation_model_options(provider_id, api_key, base_url)
-                translation_model_combo.setProperty("provider_id", provider_id)
-                preferred = apply_model_options_to_combo(translation_model_combo, model_options, current_model)
-                translation_status.setText(f"已加载 {len(model_options)} 个模型")
-                if current_model and current_model not in [option.model_id for option in model_options] and preferred:
-                    translation_status.setText(
-                        f"上次默认模型“{current_model}”已无法访问，已按优先原则改用“{preferred}”。"
-                    )
-                    QMessageBox.information(
-                        dialog,
-                        "默认模型已切换",
-                        f"上次默认模型“{current_model}”已不在当前模型列表中。\n已自动改用“{preferred}”。",
-                    )
-            except Exception as exc:
-                QMessageBox.critical(dialog, "刷新模型失败", str(exc))
-            finally:
-                refresh_translation_models_button.setEnabled(True)
+
+            refresh_translation_models_button.setEnabled(False)
+            translation_status.setText("正在获取模型列表...")
+
+            prev_worker = model_options_worker_holder[0]
+            if prev_worker is not None:
+                try:
+                    if prev_worker.isRunning():
+                        prev_worker.cancel()
+                        prev_worker.finished_signal.disconnect()
+                except (RuntimeError, AttributeError):
+                    pass
+                model_options_worker_holder[0] = None
+
+            worker = ModelOptionsFetchWorker(provider_id, api_key, base_url)
+            model_options_worker_holder[0] = worker
+            active_fetch_workers.add(worker)
+            worker.finished.connect(lambda w=worker: cleanup_worker(w))
+            worker.finished.connect(worker.deleteLater)
+            worker.finished_signal.connect(
+                lambda options, err, pid=provider_id, ui=user_initiated: on_model_fetch_finished(pid, options, err, ui)
+            )
+            worker.start()
 
         provider_combo.currentIndexChanged.connect(load_translation_provider)
-        refresh_translation_models_button.clicked.connect(refresh_translation_models)
+        refresh_translation_models_button.clicked.connect(lambda: refresh_translation_models(user_initiated=True))
         load_translation_provider()
 
         about_group = QGroupBox("关于与软件更新")
@@ -6461,7 +6626,7 @@ class MainWindow(QWidget):
         about_layout.setSpacing(8)
 
         version_row = QHBoxLayout()
-        version_label = QLabel(f"当前版本：<b>v{APP_VERSION}</b>（开源版）")
+        version_label = QLabel(f"当前版本：<b>v{APP_VERSION}</b>")
         version_row.addWidget(version_label)
 
         check_update_btn = QPushButton("检查更新")
@@ -8008,20 +8173,14 @@ class MainWindow(QWidget):
         elif markdown_path.name.startswith("full.") and markdown_path.name != "full.cleaned.md" and not source_path.exists():
             source_path = markdown_path
             translation_path = markdown_path
-        original_path = None
         meta_path = folder / "mineru_task.json"
         meta = {}
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8", errors="replace"))
-                raw_source = meta.get("source_file") or meta.get("source_pdf") or ""
-                if raw_source:
-                    candidate = Path(raw_source)
-                    if candidate.exists():
-                        original_path = candidate
             except Exception:
-                original_path = None
-        original_path = find_stored_original(folder, meta) or original_path
+                meta = {}
+        original_path = find_stored_original(folder, meta)
 
         self.current_markdown_path = markdown_path
         self.remember_open_document()
@@ -8030,9 +8189,7 @@ class MainWindow(QWidget):
         self.current_original_path = original_path
         self.current_translation_path = translation_path if translation_path and translation_path.exists() else None
         layout_translation_path = layout_translation_preview_html_path(source_path) if source_path and source_path.exists() else None
-        self.current_layout_translation_path = (
-            layout_translation_path if layout_translation_path and layout_translation_path.exists() else None
-        )
+        self.current_layout_translation_path = layout_translation_path
         # 文献切换时立即把该篇自己的排版正文字号带入控件；未调整过的文献
         # 继续交给自动排版决定字号，不继承上一篇的选择。
         self.update_layout_mode_controls()
@@ -8087,11 +8244,11 @@ class MainWindow(QWidget):
 
     def ensure_current_layout_translation_preview(self):
         source_path = self.current_source_path
-        output_path = self.current_layout_translation_path
-        if not source_path or not output_path or not output_path.exists():
+        if not source_path:
             return
+        output_path = self.current_layout_translation_path or layout_translation_preview_html_path(source_path)
         source_layout_path = layout_preview_html_path(source_path, strict_fit=False, debug_overlay=False)
-        if layout_translation_preview_is_current(output_path, source_layout_path):
+        if output_path.exists() and layout_translation_preview_is_current(output_path, source_layout_path):
             return
         key = str(source_path.resolve())
         existing = self._layout_preview_refresh_workers.get(key)
@@ -8099,6 +8256,7 @@ class MainWindow(QWidget):
             return
         if not load_layout_translation_bundle(source_path):
             return
+        self.current_layout_translation_path = output_path
         worker = LayoutPreviewRefreshWorker(source_path, output_path)
         self._layout_preview_refresh_workers[key] = worker
         worker.finished_signal.connect(self.finish_layout_preview_refresh)
