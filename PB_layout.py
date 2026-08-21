@@ -2817,33 +2817,28 @@ def layout_docx_safe_text_height(
     *,
     formula_text: str = "",
 ) -> float:
-    """Preserve block boundaries while allowing for native math and wrapped text."""
+    """保留块边界，同时适应原生公式与折行文本"""
     height = max(1.0, float(source_height))
     content_ratio = layout_docx_content_ratio(item)
     if formula_text:
-        # The source layout records a browser pixel font size.  Word's native
-        # math uses points, so retaining the raw number makes every formula
-        # about one third taller and causes neighboring absolute anchors to
-        # overlap.  Keep it within the source bbox, with only the room truly
-        # required by multi-level math.
         output_size = layout_docx_output_font_size(max(1.0, float(source_font_size))) * layout_docx_formula_point_scale(formula_text)
         try:
             output_size *= float(item.get("runtime_math_scale") or 1.0)
         except (TypeError, ValueError):
             pass
-        # Word's OMML ascent/descent is larger than the source MathJax box.
-        # Keep a conservative reservation so its auto-expanding textbox never
-        # grows into the following same-column anchor.
-        height = max(height * content_ratio, 30.0, output_size * 2.8)
-        if r"\begin" in formula_text:
-            height = max(height, 82.0)
-        elif re.search(r"\\(?:frac|dfrac|tfrac|sqrt|sum|int|left|right)\b", formula_text):
-            height = max(height, 42.0)
-        return height
+        if r"\begin" in formula_text or r"\\" in formula_text:
+            lines = max(2, formula_text.count(r"\\") + 1)
+            min_formula_height = lines * output_size * 1.8
+        elif re.search(r"\\(?:frac|dfrac|tfrac|sum|int|iint|iiint|oint|prod|bigcap|bigcup)\b", formula_text):
+            min_formula_height = max(16.0, output_size * 2.0)
+        else:
+            min_formula_height = max(10.0, output_size * 1.3)
+        return max(height * content_ratio, min_formula_height)
 
     node = item.get("node") or {}
     text = layout_docx_dom_text(node).strip()
     if text:
+        clean_text = re.sub(r"\\\[.*?\\\]|\\\(.*?\\\)", " X ", text, flags=re.S)
         block_type = str(item.get("type") or "").lower()
         font_size = layout_docx_output_font_size(max(1.0, float(source_font_size)))
         line_ratio = (
@@ -2853,11 +2848,11 @@ def layout_docx_safe_text_height(
         )
         bbox = item.get("bbox") or [0, 0, 100, source_height]
         width = max(10.0, float(bbox[2]))
-        cjk_count = len(re.findall(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]", text))
-        other_count = len(text) - cjk_count
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]", clean_text))
+        other_count = len(clean_text) - cjk_count
         total_text_width = (cjk_count * 1.05 + other_count * 0.55) * font_size
         lines = max(1, math.ceil(total_text_width / width))
-        explicit_lines = max(1, text.count("\n") + 1)
+        explicit_lines = max(1, clean_text.count("\n") + 1)
         effective_lines = max(lines, explicit_lines)
         rendered_h = effective_lines * (font_size * line_ratio)
         height = max(height, rendered_h, height * content_ratio)
@@ -3665,7 +3660,7 @@ def layout_docx_dom_equation_anchor(item: dict, shape_id: str, omml_map: dict[st
         f"position:absolute;margin-left:{x:.2f}pt;margin-top:{y:.2f}pt;width:{formula_width:.2f}pt;height:{height:.2f}pt;"
         "z-index:1;v-text-anchor:top;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;"
     )
-    paragraph = f'<w:p><w:pPr><w:jc w:val="left"/></w:pPr>{formula_xml}</w:p>'
+    paragraph = f'<w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:jc w:val="left"/></w:pPr>{formula_xml}</w:p>'
     formula_anchor = (
         f'<w:r><w:pict><v:rect id="{shape_id}" style="{shape_style}" stroked="f" filled="f">'
         f'<v:textbox style="mso-fit-shape-to-text:t" inset="0,0,0,0"><w:txbxContent>{paragraph}</w:txbxContent></v:textbox>'
@@ -3675,12 +3670,13 @@ def layout_docx_dom_equation_anchor(item: dict, shape_id: str, omml_map: dict[st
         return formula_anchor
 
     number_props = layout_docx_run_properties(layout_docx_output_font_size(float(item["font_size"])))
+    number_line_twips = max(20, int(round(layout_docx_output_font_size(float(item["font_size"])) * 20.0 * 1.08)))
     number_style = (
         f"position:absolute;margin-left:{number_x:.2f}pt;margin-top:{y:.2f}pt;width:{number_width:.2f}pt;height:{height:.2f}pt;"
         "z-index:1;v-text-anchor:top;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;"
     )
     number_paragraph = (
-        f'<w:p><w:pPr><w:jc w:val="right"/></w:pPr><w:r><w:rPr>{number_props}</w:rPr>'
+        f'<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="{number_line_twips}" w:lineRule="exact"/><w:jc w:val="right"/></w:pPr><w:r><w:rPr>{number_props}</w:rPr>'
         f'<w:t>{layout_docx_escape_text(number)}</w:t></w:r></w:p>'
     )
     return (
@@ -3751,8 +3747,8 @@ def layout_docx_apply_equation_clearance(items: list[dict]) -> None:
                     continue
                 if previous_is_subfig and block_type in {"chart_body", "image_body", "image"}:
                     continue
-                if previous_bottom + 1.0 > required_y:
-                    required_y = previous_bottom + 1.0
+                if previous_bottom > required_y:
+                    required_y = previous_bottom
         if required_y > y:
             item["bbox"][1] = required_y
             y = required_y

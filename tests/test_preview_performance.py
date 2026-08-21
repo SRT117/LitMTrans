@@ -1257,7 +1257,7 @@ class PreviewNavigationTests(unittest.TestCase):
         self.assertEqual(layout_docx_output_font_size(13.0), 13.0)
         self.assertEqual(layout_docx_formula_point_scale(r"\frac{a}{b}"), 1.0)
         self.assertEqual(layout_docx_safe_text_height({}, 42.0, 8.0), 42.0)
-        self.assertEqual(layout_docx_safe_text_height({}, 12.0, 8.0, formula_text=r"\frac{a}{b}"), 42.0)
+        self.assertEqual(layout_docx_safe_text_height({}, 12.0, 8.0, formula_text=r"\frac{a}{b}"), 16.0)
         state_script = (Path(OT_ui.__file__).parent / "PB_layout.py").read_text(encoding="utf-8")
         self.assertIn("font_size: fontSize,", state_script)
         self.assertIn('w:lineRule="exact"', state_script)
