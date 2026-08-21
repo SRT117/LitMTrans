@@ -4237,7 +4237,8 @@ class ReaderWindow(QWidget):
             self.show_markdown_path(Path(payload), self.source_web_view, self.source_fallback_viewer)
         else:
             if self.source_web_view:
-                self.source_web_view.setHtml(str(payload), QUrl.fromLocalFile(str(WORKSPACE)))
+                base_dir = (self.current_source_path.parent if self.current_source_path else self.work_dir_path()).resolve()
+                self.source_web_view.setHtml(str(payload), QUrl.fromLocalFile(str(base_dir)))
                 QTimer.singleShot(250, self.apply_reader_font_size)
                 QTimer.singleShot(500, self.install_sync_scroll_bridge)
             else:
@@ -9014,7 +9015,8 @@ class MainWindow(QWidget):
         else:
             if self.source_web_view:
                 self.clear_layout_transition_overlay(self.source_web_view)
-                self.source_web_view.setHtml(str(payload), QUrl.fromLocalFile(str(WORKSPACE)))
+                base_dir = (self.current_source_path.parent if self.current_source_path else self.work_dir_path()).resolve()
+                self.source_web_view.setHtml(str(payload), QUrl.fromLocalFile(str(base_dir)))
                 QTimer.singleShot(250, self.apply_reader_font_size)
                 QTimer.singleShot(500, self.install_sync_scroll_bridge)
                 self.schedule_layout_debug_overlay_update()
@@ -10763,6 +10765,7 @@ class MainWindow(QWidget):
                     raise MinerUError("无法生成 HTML 预览文件。")
                 self.update_export_feedback(busy_dialog, "正在写入 HTML 文件…")
                 shutil.copyfile(html_path, out_path)
+                inline_local_images_in_html(out_path, html_path.parent)
                 self.end_export_feedback(busy_dialog)
                 busy_dialog = None
                 self.finish_export(out_path, export_name=export_name)
