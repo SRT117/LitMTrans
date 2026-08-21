@@ -178,22 +178,30 @@ def _verify_copied_items(selected: list[Path], stage: Path) -> None:
             raise OSError(f"文件夹复制校验失败：{source.name}")
 
 
+def _remap_json_obj(obj, normalized_map: dict[Path, Path]):
+    if isinstance(obj, dict):
+        return {k: _remap_json_obj(v, normalized_map) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_remap_json_obj(item, normalized_map) for item in obj]
+    if isinstance(obj, str):
+        remapped = _remap_path_text(obj, normalized_map)
+        return remapped if remapped else obj
+    return obj
+
+
 def _rewrite_cached_workspace_paths(stage: Path, migrated_map: dict[Path, Path], old_dir: Path, new_dir: Path) -> None:
     """全面修正迁移目录中元数据（mineru_task.json 等）与 HTML 缓存中的旧路径引用。"""
+    normalized_map = {Path(old).resolve(): Path(new).resolve() for old, new in migrated_map.items()}
+    normalized_map[Path(old_dir).resolve()] = Path(new_dir).resolve()
+
     replacements: list[tuple[str, str]] = []
-    for old_folder, new_folder in migrated_map.items():
+    for old_folder, new_folder in normalized_map.items():
         replacements.extend([
             (old_folder.as_uri(), new_folder.as_uri()),
             (str(old_folder), str(new_folder)),
             (old_folder.as_posix(), new_folder.as_posix()),
             (json.dumps(str(old_folder))[1:-1], json.dumps(str(new_folder))[1:-1]),
         ])
-    replacements.extend([
-        (old_dir.as_uri(), new_dir.as_uri()),
-        (str(old_dir), str(new_dir)),
-        (old_dir.as_posix(), new_dir.as_posix()),
-        (json.dumps(str(old_dir))[1:-1], json.dumps(str(new_dir))[1:-1]),
-    ])
 
     for old_folder, new_folder in migrated_map.items():
         staged_folder = stage / new_folder.name
@@ -203,6 +211,15 @@ def _rewrite_cached_workspace_paths(stage: Path, migrated_map: dict[Path, Path],
             if not file_path.is_file() or file_path.suffix.lower() not in REWRITE_EXTENSIONS:
                 continue
             try:
+                if file_path.suffix.lower() == ".json":
+                    try:
+                        data = json.loads(file_path.read_text(encoding="utf-8", errors="strict"))
+                        updated_data = _remap_json_obj(data, normalized_map)
+                        file_path.write_text(json.dumps(updated_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                        continue
+                    except (json.JSONDecodeError, UnicodeError):
+                        pass
+
                 original = file_path.read_text(encoding="utf-8", errors="strict")
                 updated = original
                 for old_text, new_text in replacements:

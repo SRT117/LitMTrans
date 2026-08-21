@@ -151,7 +151,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_chat_settings_inherit_legacy_work_dir_without_overwriting_chat_fields(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             current = root / "settings_chat.json"
             legacy = root / "settings_ai_chat.json"
             workspace = root / "legacy-workspace"
@@ -162,21 +162,21 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
                 AI_common, "LEGACY_SETTINGS_PATHS", (legacy,)
             ):
                 loaded = AI_common.load_settings()
-            self.assertEqual(loaded.work_dir, str(workspace))
+            self.assertEqual(Path(loaded.work_dir).resolve(), workspace.resolve())
             self.assertEqual(loaded.ai_provider, "oneapi")
 
     def test_new_install_defaults_to_install_directory(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             app_dir = root / "appdata" / "LitMTrans"
             install_dir = root / "chosen-install"
             install_dir.mkdir()
             result = default_workspace_path(app_dir, (), install_dir)
-            self.assertEqual(result, install_dir / "workspace")
+            self.assertEqual(result.resolve(), (install_dir / "workspace").resolve())
 
     def test_missing_layout_translation_preview_is_rebuilt_from_bundle(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            source = Path(tmp_dir) / "full.cleaned.md"
+            source = (Path(tmp_dir).resolve() / "full.cleaned.md")
             source.write_text("# source", encoding="utf-8")
             expected = PB_layout.layout_translation_preview_html_path(source)
             window = MagicMock(spec=MainWindow)
@@ -214,7 +214,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_migration_rewrites_mineru_task_and_image_map_paths(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_dir = root / "old"
             new_dir = root / "new"
             old_dir.mkdir()
@@ -245,17 +245,17 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
             copy_workspace_data(old_dir, new_dir)
 
             new_task = json.loads((new_dir / "paper1" / "mineru_task.json").read_text(encoding="utf-8"))
-            self.assertEqual(new_task["source_file"], str((new_dir / "paper1" / "paper1.pdf").resolve()))
-            self.assertEqual(new_task["source_pdf"], str((new_dir / "paper1.pdf").resolve()))
-            self.assertEqual(new_task["extract_dir"], str((new_dir / "paper1" / "mineru_result").resolve()))
+            self.assertEqual(Path(new_task["source_file"]).resolve(), (new_dir / "paper1" / "paper1.pdf").resolve())
+            self.assertEqual(Path(new_task["source_pdf"]).resolve(), (new_dir / "paper1.pdf").resolve())
+            self.assertEqual(Path(new_task["extract_dir"]).resolve(), (new_dir / "paper1" / "mineru_result").resolve())
 
             new_map = json.loads((new_dir / "paper1" / "image_map.json").read_text(encoding="utf-8"))
-            self.assertEqual(new_map[0]["saved_file"], str((new_dir / "paper1" / "images" / "image_001.jpg").resolve()))
+            self.assertEqual(Path(new_map[0]["saved_file"]).resolve(), (new_dir / "paper1" / "images" / "image_001.jpg").resolve())
 
     def test_find_stored_original_strictly_prefers_local_document_files_over_stale_meta_paths(self):
         import LS_pipeline
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_paper = root / "old_workspace" / "paper"
             old_paper.mkdir(parents=True)
             old_pdf = old_paper / "paper.pdf"
@@ -277,7 +277,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
     def test_load_document_image_map_prefers_local_folder_files(self):
         import AI_chat
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_folder = root / "old"
             old_folder.mkdir()
             old_img = old_folder / "img.png"
@@ -305,7 +305,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
                 self.refresh_work_dir_label = MagicMock()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             window = DummyWindow()
             target = root / "new_workspace"
             target.mkdir()
