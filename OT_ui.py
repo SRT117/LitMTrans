@@ -1339,12 +1339,8 @@ class MonolithMark(QLabel):
 
 def populate_translation_provider_combo(combo: QComboBox) -> None:
     combo.clear()
-    mtran_ready = machine_translate.is_mtran_installed()
     for provider_id, label in TRANSLATION_PROVIDER_CHOICES:
-        display_label = label
-        if provider_id == "mtranserver_local":
-            display_label = "本地机翻（已就绪）" if mtran_ready else "本地机翻（需下载离线包）"
-        combo.addItem(display_label, provider_id)
+        combo.addItem(label, provider_id)
 
 
 def style_reasoning_effort_combo(combo: QComboBox) -> None:
@@ -6528,13 +6524,13 @@ class MainWindow(QWidget):
                         model_label.setVisible(False)
                         translation_model_combo.setVisible(False)
                         refresh_translation_models_button.setVisible(False)
-                        translation_status.setText("本地离线机翻已就绪（内置 MTranServer 离线模型，无需联网）。")
+                        translation_status.setText("本地离线机翻已就绪（内置 MTranServer 离线模型，无需联网）。提示：该轻量模型主要用于断网快速粗略通读；学术论文推荐使用【联网免费机翻】或各大 AI 模型。")
                     else:
                         download_mtran_button.setVisible(True)
                         model_label.setVisible(False)
                         translation_model_combo.setVisible(False)
                         refresh_translation_models_button.setVisible(False)
-                        translation_status.setText("尚未下载本地离线机翻模型包（约 180MB）。提示：本地模型效果比较基础，堪堪用于快速预览；推荐优先使用【联网免费机翻】或各大 AI 模型。")
+                        translation_status.setText("本地离线机翻模型缺失。点击右侧按钮可重新下载模型包。")
                 else:
                     download_mtran_button.setVisible(False)
                     model_label.setVisible(False)

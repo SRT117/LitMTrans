@@ -46,33 +46,21 @@ jobs:
       - run: python scripts/validate_release.py --tag "${{ github.ref_name }}"
       - run: python scripts/fetch_release_runtime.py
       - run: python -m unittest discover -s tests -v
-      - name: Build standard lightweight release
+      - name: Build Windows release
         shell: pwsh
         run: |
-          $env:LITMTRANS_BUNDLE_MODELS = "0"
           python scripts/build_release.py
           $version = (python -c "from app_version import APP_VERSION; print(APP_VERSION)").Trim()
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$version" "/DOutputBaseFilename=LitMTrans-$version-setup" 'installer\LitMTrans.iss'
-
-      - name: Build full offline release
-        shell: pwsh
-        run: |
-          $env:LITMTRANS_BUNDLE_MODELS = "1"
-          python scripts/build_release.py
-          $version = (python -c "from app_version import APP_VERSION; print(APP_VERSION)").Trim()
-          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$version" "/DOutputBaseFilename=LitMTrans-$version-full-setup" 'installer\LitMTrans.iss'
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' "/DAppVersion=$version" 'installer\LitMTrans.iss'
 
       - name: Create update manifest and checksums
         shell: pwsh
         run: |
           $version = (python -c "from app_version import APP_VERSION; print(APP_VERSION)").Trim()
-          $std_installer = "installer_dist\LitMTrans-$version-setup.exe"
-          $full_installer = "installer_dist\LitMTrans-$version-full-setup.exe"
-          python scripts/create_update_manifest.py --installer $std_installer --tag "${{ github.ref_name }}" --output update.json --notes "See GitHub Release notes."
-          $sums = @()
-          $sums += (Get-FileHash $std_installer -Algorithm SHA256).Hash.ToLower() + "  " + (Split-Path $std_installer -Leaf)
-          $sums += (Get-FileHash $full_installer -Algorithm SHA256).Hash.ToLower() + "  " + (Split-Path $full_installer -Leaf)
-          $sums | Set-Content installer_dist\SHA256SUMS.txt -Encoding ascii
+          $installer = "installer_dist\LitMTrans-$version-setup.exe"
+          python scripts/create_update_manifest.py --installer $installer --tag "${{ github.ref_name }}" --output update.json --notes "See GitHub Release notes."
+          $sum = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLower() + "  " + (Split-Path $installer -Leaf)
+          $sum | Set-Content installer_dist\SHA256SUMS.txt -Encoding ascii
       - name: Sync update manifest to main branch
         shell: pwsh
         run: |

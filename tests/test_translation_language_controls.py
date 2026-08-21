@@ -104,21 +104,14 @@ class TranslationLanguageControlTests(unittest.TestCase):
         finally:
             dialog.deleteLater()
 
-    def test_populate_translation_provider_combo_reflects_mtran_installed_state(self):
+    def test_populate_translation_provider_combo_includes_all_providers(self):
         from PySide6.QtWidgets import QComboBox
 
         combo = QComboBox()
-        with patch.object(machine_translate, "is_mtran_installed", return_value=False):
-            OT_ui.populate_translation_provider_combo(combo)
-            idx = combo.findData("mtranserver_local")
-            self.assertGreaterEqual(idx, 0)
-            self.assertIn("需下载", combo.itemText(idx))
-
-        with patch.object(machine_translate, "is_mtran_installed", return_value=True):
-            OT_ui.populate_translation_provider_combo(combo)
-            idx = combo.findData("mtranserver_local")
-            self.assertGreaterEqual(idx, 0)
-            self.assertIn("已就绪", combo.itemText(idx))
+        OT_ui.populate_translation_provider_combo(combo)
+        idx = combo.findData("mtranserver_local")
+        self.assertGreaterEqual(idx, 0)
+        self.assertEqual(combo.itemText(idx), "本地机翻")
 
 
 if __name__ == "__main__":
