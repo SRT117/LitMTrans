@@ -121,6 +121,21 @@ def cleanup_old_installers(updates_dir: Path, keep_version: str = "") -> None:
                 pass
 
 
+def cleanup_on_startup(updates_dir: Path | None = None) -> None:
+    """在客户端启动时清理所有已完成安装的 setup 安装包和临时残片，确保零磁盘残留。"""
+    try:
+        target_dir = updates_dir or updates_directory()
+        if not target_dir.exists():
+            return
+        for candidate in target_dir.glob("LitMTrans-*-setup.exe*"):
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def updates_directory() -> Path:
     root = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / APP_NAME / "updates"
     root.mkdir(parents=True, exist_ok=True)

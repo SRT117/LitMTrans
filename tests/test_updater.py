@@ -91,6 +91,26 @@ class UpdaterTests(unittest.TestCase):
             self.assertTrue(keep.exists())
             self.assertTrue(other.exists())
 
+    def test_cleanup_on_startup(self):
+        import tempfile
+        from pathlib import Path
+        from updater import cleanup_on_startup
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            installed = tmp_path / "LitMTrans-1.0.3-setup.exe"
+            part = tmp_path / "LitMTrans-1.0.4-setup.exe.part"
+            unrelated = tmp_path / "data.json"
+
+            for p in (installed, part, unrelated):
+                p.write_text("dummy", encoding="utf-8")
+
+            cleanup_on_startup(tmp_path)
+
+            self.assertFalse(installed.exists())
+            self.assertFalse(part.exists())
+            self.assertTrue(unrelated.exists())
+
     def test_update_manifest_url_points_to_raw_json(self):
         from app_version import GITHUB_REPOSITORY, UPDATE_MANIFEST_URL
 

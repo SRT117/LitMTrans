@@ -4905,11 +4905,20 @@ class MainWindow(QWidget):
         self.resize(1280, 820)
         self.apply_window_icon()
         self.setup_ui()
-        self._scroll_memory_timer.start()
         QTimer.singleShot(500, self.run_startup_configuration)
+        if os.name == "nt":
+            QTimer.singleShot(2000, self._cleanup_startup_update_artifacts)
         if getattr(sys, "frozen", False) and os.name == "nt":
             QTimer.singleShot(3500, self.check_for_updates)
         self.refresh_docs()
+
+    def _cleanup_startup_update_artifacts(self) -> None:
+        """在软件启动后静默清理历史下载并已安装的 setup 安装包与临时残片。"""
+        try:
+            import updater
+            updater.cleanup_on_startup()
+        except Exception:
+            pass
 
     def run_startup_configuration(self):
         """Show one coherent setup page for a new or unavailable workspace."""
