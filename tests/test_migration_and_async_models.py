@@ -21,7 +21,7 @@ from workspace_paths import default_workspace_path
 class MigrationAndAsyncModelTests(unittest.TestCase):
     def test_layout_image_src_url_generates_relative_path(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            doc_folder = Path(tmp_dir) / "paper_01"
+            doc_folder = Path(tmp_dir).resolve() / "paper_01"
             image = doc_folder / "images" / "fig 1.png"
             image.parent.mkdir(parents=True)
             image.write_bytes(b"image")
@@ -29,7 +29,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_should_copy_only_program_data(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             generated = root / "paper"
             generated.mkdir()
             (generated / ".mineru_generated").write_text("{}", encoding="utf-8")
@@ -46,7 +46,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_copy_migration_preserves_old_data_and_remaps_structured_paths(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_dir = root / "old"
             new_dir = root / "new"
             old_dir.mkdir()
@@ -94,7 +94,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
             new_source10 = new_dir / "paper10" / "full.cleaned.md"
             new_hash = hashlib.sha1(str((new_dir / "paper10").resolve()).encode("utf-8")).hexdigest()
             self.assertEqual(copied[0]["id"], f"doc-chat-{new_hash}")
-            self.assertEqual(copied[0]["document_source_path"], str(new_source10))
+            self.assertEqual(Path(copied[0]["document_source_path"]).resolve(), new_source10.resolve())
             self.assertIn(f"来源: {new_source10}", copied[0]["messages"][0]["content"])
             self.assertIn(f"普通文字提到了 {paper1}", copied[0]["messages"][0]["content"])
             copied_html = (new_dir / "paper10" / "preview_layout_translated_current.full.cleaned.html").read_text(
@@ -105,7 +105,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_copy_migration_rejects_nonempty_target_without_touching_old_data(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_dir = root / "old"
             new_dir = root / "new"
             old_dir.mkdir()
@@ -121,7 +121,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_corrupt_history_aborts_copy_and_preserves_source(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             old_dir = root / "old"
             new_dir = root / "new"
             old_dir.mkdir()
@@ -135,7 +135,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
 
     def test_current_settings_with_empty_work_dir_inherits_same_type_legacy_path(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
+            root = Path(tmp_dir).resolve()
             current = root / "settings.json"
             legacy = root / "settings_workbench.json"
             workspace = root / "legacy-workspace"
@@ -146,7 +146,7 @@ class MigrationAndAsyncModelTests(unittest.TestCase):
                 OT_common, "LEGACY_SETTINGS_PATHS", (legacy,)
             ):
                 loaded = OT_common.load_settings()
-            self.assertEqual(loaded.work_dir, str(workspace))
+            self.assertEqual(Path(loaded.work_dir).resolve(), workspace.resolve())
             self.assertEqual(loaded.ai_provider, "deepseek")
 
     def test_chat_settings_inherit_legacy_work_dir_without_overwriting_chat_fields(self):
