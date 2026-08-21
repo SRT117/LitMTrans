@@ -536,13 +536,17 @@ class WebMachineTranslator:
 
 
 
-def _resource_root() -> Path:
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return base / "resources" / "mtranserver"
+def mtran_persistent_root() -> Path:
+    """返回用户持久化目录中的 MTranServer 运行时路径。"""
+    app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if app_data:
+        return Path(app_data) / "LitMTrans" / "runtime" / "mtranserver"
+    return Path.home() / ".litmtrans" / "runtime" / "mtranserver"
 
 
-def _bundled_mtran_executable() -> Path | None:
-    bin_dir = _resource_root() / "bin"
+def _find_mtran_binary_in(bin_dir: Path) -> Path | None:
+    if not bin_dir.exists():
+        return None
     names = (
         "mtranserver.exe",
         "mtranserver-windows-amd64.exe",
@@ -552,8 +556,66 @@ def _bundled_mtran_executable() -> Path | None:
         path = bin_dir / name
         if path.exists():
             return path
-    candidates = sorted(bin_dir.glob("mtranserver*.exe")) if bin_dir.exists() else []
+    candidates = sorted(bin_dir.glob("mtranserver*.exe"))
     return candidates[0] if candidates else None
+
+
+def _candidate_resource_roots() -> list[Path]:
+    roots: list[Path] = []
+    # 1. 优先使用用户持久化目录（覆盖升级/重装不丢失已下载模型）
+    roots.append(mtran_persistent_root())
+    # 2. 打包内置 resources 目录（离线完整版）
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    roots.append(base / "resources" / "mtranserver")
+    # 3. 源码工程 resources 目录
+    project_root = Path(__file__).resolve().parent
+    roots.append(project_root / "resources" / "mtranserver")
+    return roots
+
+
+def _is_valid_resource_root(root: Path) -> bool:
+    """严格验证给定目录是否包含完整的 MTranServer 运行时（可执行程序、配置和至少一个模型）。"""
+    if not root.is_dir():
+        return False
+    bin_path = _find_mtran_binary_in(root / "bin")
+    records_path = root / "config" / "records.json"
+    model_dir = root / "models"
+    if not (bin_path and records_path.is_file() and model_dir.is_dir()):
+        return False
+    try:
+        models = [d for d in model_dir.iterdir() if d.is_dir() and any(d.glob("*.bin"))]
+        return len(models) > 0
+    except OSError:
+        return False
+
+
+def _resource_root() -> Path:
+    for root in _candidate_resource_roots():
+        if _is_valid_resource_root(root):
+            return root
+    return mtran_persistent_root()
+
+
+def _bundled_mtran_executable() -> Path | None:
+    for root in _candidate_resource_roots():
+        if _is_valid_resource_root(root):
+            binary = _find_mtran_binary_in(root / "bin")
+            if binary is not None:
+                return binary
+    # 兜底：若暂无模型但存在二进制
+    for root in _candidate_resource_roots():
+        binary = _find_mtran_binary_in(root / "bin")
+        if binary is not None:
+            return binary
+    return None
+
+
+def is_mtran_installed() -> bool:
+    """检查本地离线机翻服务二进制和模型包是否已就绪。"""
+    for root in _candidate_resource_roots():
+        if _is_valid_resource_root(root):
+            return True
+    return False
 
 
 def _port_is_open(port: int, host: str = "127.0.0.1") -> bool:

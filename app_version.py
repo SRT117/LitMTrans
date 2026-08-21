@@ -1,7 +1,7 @@
 """Public application identity and release endpoints."""
 
 APP_NAME = "LitMTrans"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 APP_AUTHOR = "SRT117"
 APP_ID = "io.github.srt117.litmtrans"
 GITHUB_REPOSITORY = "SRT117/LitMTrans"

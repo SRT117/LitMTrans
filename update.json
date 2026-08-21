@@ -1,8 +1,8 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "notes": "See GitHub Release notes.",
   "installer": {
-    "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.1/LitMTrans-1.0.1-setup.exe",
+    "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.2/LitMTrans-1.0.2-setup.exe",
     "sha256": "4361c879d1d3d62e2ddfb8941cdb947f96e6f849d73f9b2bb475f464efa3e681",
     "size": 276463006
   }

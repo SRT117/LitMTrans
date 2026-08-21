@@ -41,21 +41,32 @@ for relative_path, destination in (
 for document_name in ("LICENSE", "PRIVACY.md", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md"):
     datas.append((str(project_root / document_name), "docs"))
 
-if bundle_optional_runtime:
+# Pandoc 压缩后仅约 22.8MB，用于 EPUB 解析/导出与 Word 格式转换，作为基础运行时组件始终打包。
+pandoc_exe = resources / "pandoc.exe"
+if pandoc_exe.exists():
+    datas.append((str(pandoc_exe), "resources"))
+    pandoc_lic = project_root / "licenses" / "pandoc"
+    if pandoc_lic.exists():
+        datas.append((str(pandoc_lic), "licenses/pandoc"))
+
+# MTranServer 离线机翻服务端与配置
+mtran_bin = resources / "mtranserver" / "bin"
+if mtran_bin.exists():
     for relative_path, destination in (
-        ("pandoc.exe", "resources"),
         ("mtranserver/bin", "resources/mtranserver/bin"),
         ("mtranserver/config", "resources/mtranserver/config"),
         ("mtranserver/README.md", "resources/mtranserver"),
     ):
         source = resources / relative_path
-        if not source.exists():
-            raise SystemExit(f"Missing optional release resource: {source}")
-        datas.append((str(source), destination))
-    datas.extend([
-        (str(project_root / "licenses" / "pandoc"), "licenses/pandoc"),
-        (str(project_root / "licenses" / "mtranserver"), "licenses/mtranserver"),
-    ])
+        if source.exists():
+            datas.append((str(source), destination))
+    mtran_lic = project_root / "licenses" / "mtranserver"
+    if mtran_lic.exists():
+        datas.append((str(mtran_lic), "licenses/mtranserver"))
+
+# 控制是否将 180MB 的离线机翻大模型打包进安装包（默认 0 不打包为轻量标准版，1 为完整离线版）
+bundle_models = os.environ.get("LITMTRANS_BUNDLE_MODELS", "0") == "1"
+if bundle_models:
     for model_name in MTRAN_RELEASE_MODELS:
         model_dir = resources / "mtranserver" / "models" / model_name
         if not model_dir.is_dir():

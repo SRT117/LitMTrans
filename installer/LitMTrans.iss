@@ -8,6 +8,9 @@
 #ifndef OutputDir
   #define OutputDir "..\installer_dist"
 #endif
+#ifndef OutputBaseFilename
+  #define OutputBaseFilename "LitMTrans-" + AppVersion + "-setup"
+#endif
 
 [Setup]
 AppId={{ED51C826-275A-4DB7-A2B7-7AEE52F74117}
@@ -19,7 +22,7 @@ AppSupportURL=https://github.com/SRT117/LitMTrans/issues
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 OutputDir={#OutputDir}
-OutputBaseFilename=LitMTrans-{#AppVersion}-setup
+OutputBaseFilename={#OutputBaseFilename}
 SetupIconFile=..\resources\icon.ico
 UninstallDisplayIcon={app}\LitMTrans.exe
 Compression=lzma2/max

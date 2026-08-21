@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 import unittest
 
 from app_version import APP_VERSION
@@ -106,6 +107,136 @@ class UpdaterTests(unittest.TestCase):
         self.assertTrue(release.installer_url.startswith("https://github.com/"))
         self.assertEqual(len(release.installer_sha256), 64)
         self.assertGreater(release.installer_size, 0)
+
+
+    def test_mtran_installed_detection_and_multi_path_discovery(self):
+        import tempfile
+        from unittest.mock import patch
+        import machine_translate
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_root = Path(tmpdir).resolve()
+            # 空目录时未安装
+            with patch.object(machine_translate, "mtran_persistent_root", return_value=fake_root):
+                with patch.object(machine_translate, "_candidate_resource_roots", return_value=[fake_root]):
+                    self.assertFalse(machine_translate.is_mtran_installed())
+
+                    # 创建结构但无模型文件
+                    bin_dir = fake_root / "bin"
+                    bin_dir.mkdir()
+                    (bin_dir / "mtranserver.exe").write_bytes(b"exe")
+                    config_dir = fake_root / "config"
+                    config_dir.mkdir()
+                    (config_dir / "records.json").write_text("{}", encoding="utf-8")
+                    models_dir = fake_root / "models"
+                    models_dir.mkdir()
+                    self.assertFalse(machine_translate.is_mtran_installed())
+
+                    # 放入有效模型
+                    pair_dir = models_dir / "en_zh-Hans"
+                    pair_dir.mkdir()
+                    (pair_dir / "model.enzh.intgemm.alphas.bin").write_bytes(b"bin")
+                    self.assertTrue(machine_translate.is_mtran_installed())
+
+
+    def test_mtran_download_worker_enforces_size_limit(self):
+        import io
+        import tempfile
+        from unittest.mock import MagicMock, patch
+        from updater import MTRAN_RUNTIME_MAX_SIZE, MTranModelDownloadWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_dir = Path(tmpdir) / "mtranserver"
+            worker = MTranModelDownloadWorker(target_dir=target_dir)
+
+            # 模拟返回过大流
+            oversized_data = b"x" * (64 * 1024)
+            mock_response = MagicMock()
+            mock_response.headers.get.return_value = str(MTRAN_RUNTIME_MAX_SIZE + 1024)
+            mock_response.read.side_effect = [oversized_data, b""]
+            mock_response.__enter__.return_value = mock_response
+
+            failed_msgs = []
+            worker.failed.connect(failed_msgs.append)
+
+            with patch("urllib.request.urlopen", return_value=mock_response):
+                worker.run()
+
+            self.assertTrue(len(failed_msgs) > 0)
+            self.assertIn("超出安全限制", failed_msgs[0])
+
+    def test_mtran_download_worker_handles_cancel_and_clean_temp(self):
+        import tempfile
+        from unittest.mock import MagicMock, patch
+        from updater import MTranModelDownloadWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_dir = Path(tmpdir) / "mtranserver"
+            worker = MTranModelDownloadWorker(target_dir=target_dir)
+            worker.cancel()
+
+            cancelled_fired = []
+            worker.cancelled.connect(lambda: cancelled_fired.append(True))
+
+            worker.run()
+            self.assertTrue(len(cancelled_fired) > 0)
+            # 确认临时文件已被彻底清理
+            leftover = list(Path(tmpdir).glob(".mtran_*"))
+            self.assertEqual(leftover, [])
+
+    def test_mtran_download_worker_atomic_extraction_rejects_invalid_archive(self):
+        import hashlib
+        import tempfile
+        import zipfile
+        from unittest.mock import MagicMock, patch
+        from updater import MTRAN_RUNTIME_ZIP_SHA256, MTranModelDownloadWorker
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target_dir = Path(tmpdir) / "mtranserver"
+            worker = MTranModelDownloadWorker(target_dir=target_dir)
+
+            # 制作一个结构残缺的 zip（例如缺少 bin 和 models）
+            zip_buf = tempfile.NamedTemporaryFile(delete=False)
+            with zipfile.ZipFile(zip_buf.name, "w") as zf:
+                zf.writestr("mtranserver/README.md", "incomplete")
+            zip_bytes = Path(zip_buf.name).read_bytes()
+            zip_buf.close()
+            Path(zip_buf.name).unlink(missing_ok=True)
+
+            def make_resp(*args, **kwargs):
+                resp = MagicMock()
+                resp.headers.get.return_value = str(len(zip_bytes))
+                resp.read.side_effect = [zip_bytes, b""]
+                resp.__enter__.return_value = resp
+                return resp
+
+            failed_msgs = []
+            worker.failed.connect(failed_msgs.append)
+
+            # 模拟 SHA-256 匹配但内容残缺
+            with patch("urllib.request.urlopen", side_effect=make_resp):
+                with patch("updater.MTRAN_RUNTIME_ZIP_SHA256", hashlib.sha256(zip_bytes).hexdigest()):
+                    worker.run()
+
+            self.assertTrue(len(failed_msgs) > 0)
+            self.assertIn("不完整", failed_msgs[0])
+            # 目标正式目录不应被创建
+            self.assertFalse(target_dir.exists())
+
+    def test_mtran_download_dialog_reject_and_close_cancels_worker(self):
+        from unittest.mock import patch
+        from updater import MTranModelDownloadDialog
+
+        with patch("updater.MTranModelDownloadWorker.start"):
+            dialog = MTranModelDownloadDialog()
+            dialog.worker.isRunning = lambda: True
+
+            cancelled = []
+            dialog.worker.cancel = lambda: cancelled.append(True)
+            dialog.worker.wait = lambda timeout=1000: True
+
+            dialog.reject()
+            self.assertTrue(len(cancelled) > 0)
 
 
 if __name__ == "__main__":

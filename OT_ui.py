@@ -1339,8 +1339,12 @@ class MonolithMark(QLabel):
 
 def populate_translation_provider_combo(combo: QComboBox) -> None:
     combo.clear()
+    mtran_ready = machine_translate.is_mtran_installed()
     for provider_id, label in TRANSLATION_PROVIDER_CHOICES:
-        combo.addItem(label, provider_id)
+        display_label = label
+        if provider_id == "mtranserver_local":
+            display_label = "本地机翻（已就绪）" if mtran_ready else "本地机翻（需下载离线包）"
+        combo.addItem(display_label, provider_id)
 
 
 def style_reasoning_effort_combo(combo: QComboBox) -> None:
@@ -6350,7 +6354,22 @@ class MainWindow(QWidget):
         model_row.addWidget(translation_model_combo, 1)
         refresh_translation_models_button = QPushButton("刷新模型列表")
         model_row.addWidget(refresh_translation_models_button)
+        download_mtran_button = QPushButton("下载离线模型包 (~180MB)")
+        download_mtran_button.setVisible(False)
+        model_row.addWidget(download_mtran_button)
         translation_layout.addLayout(model_row)
+
+        def on_download_mtran_clicked():
+            from updater import MTranModelDownloadDialog
+            dlg = MTranModelDownloadDialog(dialog)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                populate_translation_provider_combo(provider_combo)
+                saved_idx = provider_combo.findData(machine_translate.MTRAN_SERVER_PROVIDER)
+                if saved_idx >= 0:
+                    provider_combo.setCurrentIndex(saved_idx)
+                load_translation_provider(provider_id=machine_translate.MTRAN_SERVER_PROVIDER)
+
+        download_mtran_button.clicked.connect(on_download_mtran_clicked)
 
         deepseek_reasoning_row = QWidget()
         deepseek_reasoning_row.setFixedHeight(34)
@@ -6502,19 +6521,34 @@ class MainWindow(QWidget):
                 provider_row.setStretch(1, 1)
                 provider_row.setStretch(3, 0)
                 provider_row.setStretch(5, 0)
-                model_label.setVisible(False)
-                translation_model_combo.setVisible(False)
-                refresh_translation_models_button.setVisible(False)
+                if is_local:
+                    mtran_ready = machine_translate.is_mtran_installed()
+                    if mtran_ready:
+                        download_mtran_button.setVisible(False)
+                        model_label.setVisible(False)
+                        translation_model_combo.setVisible(False)
+                        refresh_translation_models_button.setVisible(False)
+                        translation_status.setText("本地离线机翻已就绪（内置 MTranServer 离线模型，无需联网）。")
+                    else:
+                        download_mtran_button.setVisible(True)
+                        model_label.setVisible(False)
+                        translation_model_combo.setVisible(False)
+                        refresh_translation_models_button.setVisible(False)
+                        translation_status.setText("尚未下载本地离线机翻模型包（约 180MB）。提示：本地模型效果比较基础，堪堪用于快速预览；推荐优先使用【联网免费机翻】或各大 AI 模型。")
+                else:
+                    download_mtran_button.setVisible(False)
+                    model_label.setVisible(False)
+                    translation_model_combo.setVisible(False)
+                    refresh_translation_models_button.setVisible(False)
+                    translation_status.setText(
+                        "Edge 本地翻译在本机运行；首次使用会询问是否下载语言模型。"
+                        if provider_id == machine_translate.EDGE_LOCAL_PROVIDER
+                        else "联网免费机翻先快速探测 Google，不可达时自动切换到 Bing；无需配置 API 密钥、服务地址或模型。"
+                    )
                 translation_model_combo.clear()
                 translation_model_combo.addItem(machine_translate.provider_label(provider_id))
-                translation_status.setText(
-                    "本地免费机翻使用内置 MTranServer 离线翻译，无需配置 API 密钥、服务地址或模型。"
-                    if is_local
-                    else "Edge 本地翻译在本机运行；首次使用会询问是否下载语言模型。"
-                    if provider_id == machine_translate.EDGE_LOCAL_PROVIDER
-                    else "联网免费机翻先快速探测 Google，不可达时自动切换到 Bing；无需配置 API 密钥、服务地址或模型。"
-                )
                 return
+            download_mtran_button.setVisible(False)
             for widget in (api_key_label, ai_key_input, base_url_label, base_url_input):
                 widget.setVisible(True)
             provider_combo.setMaximumWidth(170)
@@ -11795,6 +11829,25 @@ class MainWindow(QWidget):
             if event is not None:
                 event.set()
 
+    def ensure_translation_provider_ready(self, provider_id: str, parent=None) -> bool:
+        """检查翻译服务是否就绪；如果是本地机翻且未下载离线包，提示用户下载或切换。"""
+        if provider_id == machine_translate.MTRAN_SERVER_PROVIDER and not machine_translate.is_mtran_installed():
+            ans = QMessageBox.question(
+                parent or self,
+                "未检测到本地离线机翻模型",
+                "当前尚未下载本地离线机翻模型包（约 180 MB）。\n\n"
+                "提示：该本地离线模型翻译效果比较基础，堪堪用于快速预览；学术论文建议使用【联网免费机翻】或【DeepSeek / AI 大模型】获得更高质量的译文。\n\n"
+                "是否仍要下载离线机翻模型包？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if ans == QMessageBox.Yes:
+                from updater import MTranModelDownloadDialog
+                dlg = MTranModelDownloadDialog(parent or self)
+                return dlg.exec() == QDialog.DialogCode.Accepted
+            return False
+        return True
+
     def start_translation_job(
         self,
         source: Path,
@@ -11802,6 +11855,9 @@ class MainWindow(QWidget):
         allow_parse_handoff: bool = False,
     ):
         if self.reject_new_processing_task("翻译", allow_parse_handoff=allow_parse_handoff):
+            return False
+        provider_id = getattr(job_config.ai_config, "provider", "")
+        if not self.ensure_translation_provider_ready(provider_id):
             return False
         job_config.mode = self.recommend_chunked_mode_for_long_pdf(source, job_config.mode)
         self.save_translation_preferences(
@@ -11846,6 +11902,9 @@ class MainWindow(QWidget):
         allow_parse_handoff: bool = False,
     ):
         if self.reject_new_processing_task("排版翻译", allow_parse_handoff=allow_parse_handoff):
+            return False
+        provider_id = getattr(ai_config, "provider_id", "") or getattr(ai_config, "provider", "")
+        if not self.ensure_translation_provider_ready(provider_id):
             return False
         if not load_layout_preview_bundle(source):
             QMessageBox.critical(self, "缺少版面数据", "当前文档缺少 MinerU layout.json，无法进行排版翻译。请重新解析该文档。")
