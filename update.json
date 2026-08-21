@@ -3,7 +3,7 @@
   "notes": "See GitHub Release notes.",
   "installer": {
     "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.2/LitMTrans-1.0.2-setup.exe",
-    "sha256": "4361c879d1d3d62e2ddfb8941cdb947f96e6f849d73f9b2bb475f464efa3e681",
-    "size": 276463006
+    "sha256": "ac58d6f1dd82e7421783562ca6c0edd15d8430dca369174392c396a978a23ed3",
+    "size": 236906184
   }
 }
