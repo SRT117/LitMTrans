@@ -3,7 +3,7 @@
   "notes": "- 修复 Word 导出报错问题：增强排版文档中公式与复杂样式参数的容错解析，解决部分包含公式与自定义行距/段间距的文献导出 Word 失败的问题。",
   "installer": {
     "url": "https://github.com/SRT117/LitMTrans/releases/download/v1.0.5/LitMTrans-1.0.5-setup.exe",
-    "sha256": "c822bfa8bd58e95256a04ab9b2e5661413e5b2dbdff26fd47505e5ec5363cee0",
-    "size": 272815224
+    "sha256": "a771520b6dd6c561139fe5ddb82f1ed5d34c7ef7e908d6164c6188a394769970",
+    "size": 272737655
   }
 }
