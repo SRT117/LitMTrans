@@ -3255,9 +3255,14 @@ def layout_docx_css_values(style_text: str) -> dict[str, str]:
     return values
 
 
-def layout_docx_css_number(values: dict[str, str], name: str, default: float = 0.0) -> float:
+def layout_docx_css_number(values: dict[str, str], name: str, default: float | None = 0.0) -> float | None:
     match = re.search(r"-?[0-9]+(?:\.[0-9]+)?", str(values.get(name) or ""))
-    return float(match.group(0)) if match else float(default)
+    if match:
+        try:
+            return float(match.group(0))
+        except (TypeError, ValueError):
+            pass
+    return float(default) if default is not None else None
 
 
 def layout_docx_default_line_ratio(block_type: str) -> float:
@@ -3570,7 +3575,10 @@ def layout_docx_dom_paragraphs(node: dict) -> list[dict]:
 
 def layout_docx_dom_text_anchor(item: dict, shape_id: str, omml_map: dict[str, str]) -> str:
     node = item["node"]
-    font_size = max(1.0, float(item["font_size"]))
+    try:
+        font_size = max(1.0, float(item.get("font_size") or 8.0))
+    except (TypeError, ValueError):
+        font_size = 8.0
     output_font_size = layout_docx_output_font_size(font_size)
     block_type = str(item.get("type") or "")
     runtime_bold = item.get("runtime_bold")
@@ -3579,22 +3587,30 @@ def layout_docx_dom_text_anchor(item: dict, shape_id: str, omml_map: dict[str, s
     paragraphs: list[str] = []
     for paragraph_node in layout_docx_dom_paragraphs(node):
         paragraph_style = layout_docx_css_values(str((paragraph_node.get("attrs") or {}).get("style") or ""))
-        first_line = layout_docx_css_number(paragraph_style, "text-indent", 0.0)
+        first_line = layout_docx_css_number(paragraph_style, "text-indent", 0.0) or 0.0
         runs = layout_docx_mixed_runs_from_html(layout_docx_dom_html(paragraph_node, inner=True), font_size, omml_map, bold=bold)
+        try:
+            raw_line_ratio = float(item.get("line_ratio") or 1.18)
+        except (TypeError, ValueError):
+            raw_line_ratio = 1.18
         effective_line_ratio = (
-            max(1.18, float(item.get("line_ratio") or 1.18))
-            if block_type == "title" or float(item.get("line_ratio") or 1.0) < 1.15
-            else float(item["line_ratio"])
+            max(1.18, raw_line_ratio)
+            if block_type == "title" or raw_line_ratio < 1.15
+            else raw_line_ratio
         )
         line_twips = max(20, int(round(output_font_size * 20.0 * effective_line_ratio)))
-        after_twips = max(0, int(round(output_font_size * 20.0 * float(item["para_gap"]))))
+        try:
+            para_gap = float(item.get("para_gap") or 0.0)
+        except (TypeError, ValueError):
+            para_gap = 0.0
+        after_twips = max(0, int(round(output_font_size * 20.0 * para_gap)))
         indent_xml = f'<w:ind w:firstLine="{int(round(first_line * 20.0))}"/>' if abs(first_line) >= 0.05 else ""
         jc = {"center": "center", "right": "right", "justify": "both"}.get(align, "left")
         paragraphs.append(
             f'<w:p><w:pPr><w:spacing w:before="0" w:after="{after_twips}" w:line="{line_twips}" w:lineRule="exact"/>'
             f'{indent_xml}<w:jc w:val="{jc}"/></w:pPr>{runs}</w:p>'
         )
-    x, y, width, source_height = item["bbox"]
+    x, y, width, source_height = (float(v) for v in item["bbox"])
     height = layout_docx_safe_text_height(item, source_height, font_size)
     weight = "font-weight:bold;" if bold else ""
     shape_style = (
@@ -3619,14 +3635,18 @@ def layout_docx_dom_equation_anchor(item: dict, shape_id: str, omml_map: dict[st
         math_scale = float(item.get("runtime_math_scale") or 1.0)
     except (TypeError, ValueError):
         math_scale = 1.0
+    try:
+        font_size = max(1.0, float(item.get("font_size") or 8.0))
+    except (TypeError, ValueError):
+        font_size = 8.0
     formula_xml = layout_docx_omml_with_font_size(
         formula_xml,
-        layout_docx_output_font_size(float(item["font_size"])) * layout_docx_formula_point_scale(tex) * max(0.1, min(1.0, math_scale)),
+        layout_docx_output_font_size(font_size) * layout_docx_formula_point_scale(tex) * max(0.1, min(1.0, math_scale)),
     )
     number_nodes = layout_docx_dom_find(item["node"], lambda value: "layout-equation-number" in layout_docx_dom_classes(value))
     number = layout_docx_dom_text(number_nodes[0]).strip() if number_nodes else ""
-    x, y, width, source_height = item["bbox"]
-    height = layout_docx_safe_text_height(item, source_height, float(item["font_size"]), formula_text=tex)
+    x, y, width, source_height = (float(v) for v in item["bbox"])
+    height = layout_docx_safe_text_height(item, source_height, font_size, formula_text=tex)
 
     # In HTML, the equation text container can span to the column right margin.
     # Extract the --equation-number-right CSS variable from .layout-equation-text
@@ -3669,8 +3689,8 @@ def layout_docx_dom_equation_anchor(item: dict, shape_id: str, omml_map: dict[st
     if not number:
         return formula_anchor
 
-    number_props = layout_docx_run_properties(layout_docx_output_font_size(float(item["font_size"])))
-    number_line_twips = max(20, int(round(layout_docx_output_font_size(float(item["font_size"])) * 20.0 * 1.08)))
+    number_props = layout_docx_run_properties(layout_docx_output_font_size(font_size))
+    number_line_twips = max(20, int(round(layout_docx_output_font_size(font_size) * 20.0 * 1.08)))
     number_style = (
         f"position:absolute;margin-left:{number_x:.2f}pt;margin-top:{y:.2f}pt;width:{number_width:.2f}pt;height:{height:.2f}pt;"
         "z-index:1;v-text-anchor:top;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;"
@@ -3984,21 +4004,30 @@ def layout_docx_items_from_html(
                 runtime_font_size = float(runtime_font_size)
             except (TypeError, ValueError):
                 runtime_font_size = 0.0
-            font_size = runtime_font_size if runtime_font_size > 0 else layout_docx_css_number(
-                css,
-                "font-size",
-                float(node_attrs.get("data-base-font") or 8.0),
+            font_size = runtime_font_size if runtime_font_size > 0 else (
+                layout_docx_css_number(
+                    css,
+                    "font-size",
+                    float(node_attrs.get("data-base-font") or 8.0),
+                )
+                or 8.0
             )
             runtime_line_ratio = runtime_item.get("line_ratio")
             try:
                 runtime_line_ratio = float(runtime_line_ratio)
             except (TypeError, ValueError):
                 runtime_line_ratio = 0.0
-            inline_line_ratio = layout_docx_css_number(css, "line-height", 0.0)
-            line_ratio = runtime_line_ratio if runtime_line_ratio > 0 else float(
-                node_attrs.get("data-line-ratio") or inline_line_ratio or layout_docx_default_line_ratio(block_type)
-            )
-            para_gap = float(node_attrs.get("data-para-gap") or 0.0)
+            inline_line_ratio = layout_docx_css_number(css, "line-height", 0.0) or 0.0
+            try:
+                line_ratio = runtime_line_ratio if runtime_line_ratio > 0 else float(
+                    node_attrs.get("data-line-ratio") or inline_line_ratio or layout_docx_default_line_ratio(block_type)
+                )
+            except (TypeError, ValueError):
+                line_ratio = layout_docx_default_line_ratio(block_type)
+            try:
+                para_gap = float(node_attrs.get("data-para-gap") or 0.0)
+            except (TypeError, ValueError):
+                para_gap = 0.0
             runtime_content_ratio = runtime_item.get("content_ratio")
             try:
                 runtime_content_ratio = float(runtime_content_ratio)

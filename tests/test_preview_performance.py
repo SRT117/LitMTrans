@@ -24,6 +24,7 @@ from PB_layout import (
     is_layout_metadata_text,
     local_column_right_for_bbox,
     layout_docx_apply_equation_clearance,
+    layout_docx_css_number,
     layout_docx_dom_text_anchor,
     layout_docx_formula_point_scale,
     layout_docx_items_from_html,
@@ -1082,6 +1083,40 @@ class PreviewNavigationTests(unittest.TestCase):
             self.assertNotIn("(a)", document_xml)
             self.assertNotIn("(b)", document_xml)
             self.assertIn("Figure 1", document_xml)
+
+    def test_layout_docx_css_number_handles_none_default(self):
+        self.assertIsNone(layout_docx_css_number({}, "--equation-number-right", None))
+        self.assertEqual(layout_docx_css_number({"left": "15.5px"}, "left", 0.0), 15.5)
+        self.assertEqual(layout_docx_css_number({}, "left", 0.0), 0.0)
+
+    def test_render_layout_editable_html_docx_with_equations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            html_path = folder / "layout.html"
+            html_path.write_text(
+                '<section class="layout-page-wrap" data-page-width="612" data-page-height="792">'
+                '<div class="layout-page">'
+                '<div class="layout-block type-interline_equation" style="left:50px;top:100px;width:250px;height:40px">'
+                '<div class="layout-equation-text">'
+                '<div class="layout-math layout-equation-formula">\\(E = mc^2\\)</div>'
+                '</div>'
+                '</div>'
+                '<div class="layout-block type-interline_equation" style="left:50px;top:160px;width:250px;height:40px">'
+                '<div class="layout-equation-text has-number" style="--equation-number-right:250.00px">'
+                '<div class="layout-math layout-equation-formula">\\(a^2 + b^2 = c^2\\)</div>'
+                '<div class="layout-equation-number">(1)</div>'
+                '</div>'
+                '</div>'
+                '</div></section>',
+                encoding="utf-8",
+            )
+            out_path = folder / "layout.docx"
+            render_layout_editable_html_docx(html_path, out_path)
+            self.assertTrue(out_path.exists())
+            with zipfile.ZipFile(out_path) as archive:
+                document_xml = archive.read("word/document.xml").decode("utf-8")
+            self.assertIn("word/document.xml", [info.filename for info in archive.infolist()])
+            self.assertIn("(1)", document_xml)
 
     def test_layout_pdf_refits_equation_geometry_without_blocking_on_animation_frames(self):
         source = Path(OT_ui.__file__).read_text(encoding="utf-8")
